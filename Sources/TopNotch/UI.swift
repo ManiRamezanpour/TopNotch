@@ -53,7 +53,8 @@ let symbols = Tab.allCases.map(\.icon) + [
     "bolt.circle.fill", "bolt.circle", "backward.fill", "forward.fill", "play.fill", "pause.fill", "speaker.wave.2.fill",
     "captions.bubble.fill", "music.note", "link", "chevron.left.forwardslash.chevron.right", "number", "text.alignleft",
     "textformat", "checkmark", "doc.on.doc", "trash", "lock.shield.fill", "gearshape", "arrow.triangle.2.circlepath",
-    "tray", "sparkle", "hand.wave.fill",
+    "tray", "sparkle", "hand.wave.fill", "plus.circle.fill", "checkmark.circle.fill", "circle", "flag.fill", "flag",
+    "xmark", "note.text", "textformat.size.smaller", "textformat.size.larger",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.
@@ -70,7 +71,7 @@ struct Pill: View {
     var body: some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.system(size: 9, weight: .bold))
-            Text(text.uppercased()).font(mono(9, .bold)).kerning(1)
+            if !text.isEmpty { Text(text.uppercased()).font(mono(9, .bold)).kerning(1) }
         }
         .foregroundStyle(color)
         .padding(.horizontal, 8).frame(height: 20)
@@ -156,8 +157,7 @@ struct NotchView: View {
 
     var size: CGSize {
         if s.open { return AppDelegate.openSize }
-        let busy = !agents.live.isEmpty || music.playing
-        let w = s.notch.width + 2 * ((busy ? 62 : 0) + flare)
+        let w = s.notch.width + 2 * (96 + flare)  // wings always out: the messages section lives there
         if toast != nil { return CGSize(width: max(w, 560), height: s.notch.height + 78) }
         return lyricIsland ? CGSize(width: max(w, 620), height: s.notch.height + 56) : CGSize(width: w, height: s.notch.height)
     }
@@ -191,7 +191,7 @@ struct NotchView: View {
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)).animation(spring.delay(0.06)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
-                    Collapsed(s: s, music: music, agents: agents, lyric: lyricIsland)
+                    Collapsed(s: s, music: music, agents: agents, notifs: notifs, lyric: lyricIsland)
                         .transition(.opacity.animation(.easeInOut(duration: 0.18)))
                 }
             }
@@ -207,7 +207,7 @@ struct NotchView: View {
 // MARK: - Collapsed
 
 struct Collapsed: View {
-    let s: NotchState, music: Music, agents: Agents, lyric: Bool
+    let s: NotchState, music: Music, agents: Agents, notifs: Notifs, lyric: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -235,31 +235,56 @@ struct Collapsed: View {
                 Caps(text: f.app, color: f.color)
             }
             .foregroundStyle(f.color)
-        } else if !agents.live.isEmpty {
-            let waiting = agents.live.contains { $0.state == .wait }
-            let c: Color = waiting ? .amber : .neon
-            HStack(spacing: 5) {
-                Image(systemName: waiting ? "hand.wave.fill" : "sparkle")
-                    .font(.system(size: 10, weight: .bold))
-                    .symbolEffect(.pulse, isActive: !waiting)
-                Text("\(agents.live.count)").font(mono(11, .bold))
+        } else {
+            HStack(spacing: 10) {
+                let yours = agents.live.filter { $0.state == .wait }.count
+                if agents.live.count > yours { count("sparkle", agents.live.count - yours, .neon, pulse: true) }
+                if yours > 0 { count("hand.wave.fill", yours, .amber, pulse: false) }
+                if music.playing {
+                    HStack(spacing: 5) {
+                        if let a = music.art {
+                            Image(nsImage: a).resizable().frame(width: 15, height: 15).clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                        Bars(on: true)
+                    }
+                }
             }
-            .foregroundStyle(c)
-            .shadow(color: c.opacity(0.6), radius: 4)
         }
+    }
+
+    func count(_ icon: String, _ n: Int, _ c: Color, pulse: Bool) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 10, weight: .bold)).symbolEffect(.pulse, isActive: pulse)
+            Text("\(n)").font(mono(11, .bold)).contentTransition(.numericText())
+        }
+        .foregroundStyle(c)
+        .shadow(color: c.opacity(0.6), radius: 4)
     }
 
     @ViewBuilder var right: some View {
         if s.flash != nil {
             Caps(text: "now")
-        } else if music.playing {
-            HStack(spacing: 6) {
-                if let a = music.art {
-                    Image(nsImage: a).resizable().frame(width: 16, height: 16).clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-                Bars(on: true)
+        } else {
+            HStack(spacing: 10) {
+                MsgBadge(icon: "paperplane.fill", color: .tg, count: notifs.badges["Telegram"])
+                MsgBadge(icon: "phone.bubble.fill", color: .wa, count: notifs.badges["WhatsApp"])
             }
         }
+    }
+}
+
+/// Always-on unread indicator: app icon lit in brand color + Dock badge count, dim when nothing's waiting.
+struct MsgBadge: View {
+    let icon: String, color: Color, count: String?
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 10, weight: .bold))
+                .symbolEffect(.bounce, value: count)
+            if let count { Text(count).font(mono(11, .bold)).foregroundStyle(.white).contentTransition(.numericText()) }
+        }
+        .foregroundStyle(count == nil ? Color.fg3 : color)
+        .shadow(color: count == nil ? .clear : color.opacity(0.7), radius: 4)
+        .animation(spring, value: count)
     }
 }
 
@@ -435,14 +460,29 @@ struct AgentsPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             limits
+            let live = agents.live.filter { $0.state != .wait }, yours = agents.live.filter { $0.state == .wait }
             if agents.live.isEmpty {
                 Empty(icon: "moon.zzz", title: "No agents running", sub: "go touch grass")
             } else {
                 ScrollView {
-                    VStack(spacing: 4) { ForEach(agents.live) { Row(a: $0, tok: agents.tokens[$0.id] ?? 0) } }
+                    VStack(alignment: .leading, spacing: 3) {
+                        section("Live", live, .neon)
+                        section("Your turn", yours, .amber)
+                    }
                 }
                 .scrollIndicators(.never)
             }
+        }
+    }
+
+    @ViewBuilder func section(_ title: String, _ list: [Agent], _ c: Color) -> some View {
+        if !list.isEmpty {
+            HStack(spacing: 6) {
+                Circle().fill(c).frame(width: 5, height: 5).shadow(color: c, radius: 3)
+                Caps(text: "\(title) · \(list.count)", color: c)
+            }
+            .padding(.top, 4).padding(.leading, 2)
+            ForEach(list) { Row(a: $0, tok: agents.tokens[$0.id] ?? 0) }
         }
     }
 
@@ -531,41 +571,30 @@ struct Row: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            ZStack {
-                Circle().fill(color.opacity(0.15))
-                Image(systemName: stateIcon).font(.system(size: 11, weight: .bold)).foregroundStyle(color)
-                    .symbolEffect(.pulse, isActive: a.state == .run || a.state == .think)
-            }
-            .frame(width: 26, height: 26)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 7) {
-                    Text(a.project).font(sans(13, .semibold)).foregroundStyle(Color.fg).lineLimit(1)
-                    Caps(text: stateLabel, color: color)
-                    if a.subs > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 9))
-                            Text("\(a.subs)").font(mono(9, .bold))
-                        }
-                        .foregroundStyle(Color.ice)
-                    }
-                }
-                HStack(spacing: 5) {
-                    Image(systemName: tool.icon).font(.system(size: 9)).foregroundStyle(Color.fg3)
-                    Text(tool.text).font(mono(10)).foregroundStyle(Color.fg2).lineLimit(1).truncationMode(.tail)
-                }
-            }
+        HStack(spacing: 9) {
+            Image(systemName: stateIcon).font(.system(size: 10, weight: .bold)).foregroundStyle(color)
+                .symbolEffect(.pulse, isActive: a.state == .run || a.state == .think)
+                .frame(width: 20, height: 20)
+                .background(color.opacity(0.15), in: Circle())
+            Text(a.project).font(sans(12, .semibold)).foregroundStyle(Color.fg).lineLimit(1)
+                .frame(width: 104, alignment: .leading)
+            Image(systemName: tool.icon).font(.system(size: 9)).foregroundStyle(Color.fg3)
+            Text(tool.text).font(mono(10)).foregroundStyle(Color.fg2).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 6)
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(fmtTok(tok)).font(mono(11, .semibold)).foregroundStyle(Color.fg)
-                Caps(text: ago(a.updated))
+            if a.subs > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 9))
+                    Text("\(a.subs)").font(mono(9, .bold))
+                }
+                .foregroundStyle(Color.ice)
             }
+            Text(fmtTok(tok)).font(mono(10, .semibold)).foregroundStyle(Color.fg2)
+            Text(ago(a.updated)).font(mono(9)).foregroundStyle(Color.fg3).frame(width: 26, alignment: .trailing)
         }
-        .padding(.horizontal, 10).padding(.vertical, 7)
+        .padding(.horizontal, 8).padding(.vertical, 5)
         .card(color, hover: hover)
         .onHover { h in withAnimation(.easeOut(duration: 0.12)) { hover = h } }
-        .help(a.detail)
+        .help("\(stateLabel): \(a.detail)")
     }
 }
 
@@ -881,17 +910,171 @@ struct MsgsPane: View {
     }
 }
 
-// MARK: - Notes
+// MARK: - Scratchpad: todos + notes
+
+struct Todo: Codable, Identifiable, Equatable {
+    var id = UUID()
+    var text: String
+    var done = false
+    var flag = false
+}
+
+enum TodoFilter: String, CaseIterable { case all, active, done }
 
 struct NotesPane: View {
     @AppStorage("notes") private var text = ""
+    @AppStorage("todos") private var raw = "[]"
+    @AppStorage("padMode") private var mode = "todo"
+    @AppStorage("notesSize") private var fontSize = 12.0
+    @State private var draft = ""
+    @State private var filter = TodoFilter.all
+    @State private var hover: UUID?
+
+    var todos: [Todo] {
+        get { (try? JSONDecoder().decode([Todo].self, from: Data(raw.utf8))) ?? [] }
+        nonmutating set { raw = String(data: (try? JSONEncoder().encode(newValue)) ?? Data("[]".utf8), encoding: .utf8)! }
+    }
+    /// flagged first, then open, then done
+    var shown: [Todo] {
+        todos.filter { filter == .all || (filter == .done) == $0.done }
+            .sorted { ($0.done ? 2 : $0.flag ? 0 : 1) < ($1.done ? 2 : $1.flag ? 0 : 1) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Header(icon: "square.and.pencil", title: "Scratchpad",
-                   sub: "\(text.split(whereSeparator: \.isNewline).count) lines · \(text.count) chars", color: .amber) { EmptyView() }
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.pencil").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.amber)
+                Text("Scratchpad").font(sans(13, .semibold))
+                Caps(text: mode == "todo" ? "\(todos.filter { !$0.done }.count) open · \(todos.filter(\.done).count) done"
+                                          : "\(text.split(whereSeparator: \.isNewline).count) lines · \(text.count) chars")
+                Spacer()
+                HStack(spacing: 2) {
+                    seg("todo", "checklist")
+                    seg("notes", "note.text")
+                }
+                .padding(2)
+                .background(Color.white.opacity(0.05), in: Capsule())
+            }
+            if mode == "todo" { todoView } else { notesView }
+        }
+        .buttonStyle(Press())
+    }
+
+    func seg(_ m: String, _ icon: String) -> some View {
+        Button { withAnimation(spring) { mode = m } } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 9, weight: .bold))
+                Text(m.uppercased()).font(mono(9, .bold)).kerning(1)
+            }
+            .foregroundStyle(mode == m ? Color.black : Color.fg3)
+            .padding(.horizontal, 9).frame(height: 20)
+            .background(mode == m ? Color.amber : .clear, in: Capsule())
+        }
+    }
+
+    // MARK: todo
+
+    var todoView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus.circle.fill").foregroundStyle(Color.amber)
+                TextField("", text: $draft, prompt: Text("add a task, hit return").foregroundStyle(Color.fg3))
+                    .textFieldStyle(.plain).font(sans(13))
+                    .onSubmit(add)
+            }
+            .padding(.horizontal, 10).frame(height: 30)
+            .card(.amber)
+
+            HStack(spacing: 4) {
+                ForEach(TodoFilter.allCases, id: \.self) { f in
+                    Button { withAnimation(spring) { filter = f } } label: {
+                        Caps(text: f.rawValue, color: filter == f ? .amber : .fg3)
+                            .padding(.horizontal, 7).frame(height: 18)
+                            .background(filter == f ? Color.amber.opacity(0.14) : .clear, in: Capsule())
+                    }
+                }
+                Spacer()
+                if todos.contains(where: \.done) {
+                    Button { withAnimation(spring) { todos.removeAll(where: \.done) } } label: {
+                        Pill(icon: "trash", text: "clear done", color: .hot)
+                    }
+                }
+            }
+
+            if shown.isEmpty {
+                Empty(icon: "checklist", title: filter == .done ? "Nothing finished yet" : "All clear", sub: "type above to add one")
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 3) { ForEach(shown) { row($0) } }
+                }
+                .scrollIndicators(.never)
+            }
+        }
+    }
+
+    func add() {
+        let t = draft.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return }
+        withAnimation(spring) { todos.insert(Todo(text: t), at: 0) }
+        draft = ""
+    }
+
+    func update(_ t: Todo, _ f: (inout Todo) -> Void) {
+        var all = todos
+        guard let i = all.firstIndex(where: { $0.id == t.id }) else { return }
+        f(&all[i])
+        withAnimation(spring) { todos = all }
+    }
+
+    func row(_ t: Todo) -> some View {
+        let on = hover == t.id
+        return HStack(spacing: 10) {
+            Button { update(t) { $0.done.toggle() } } label: {
+                Image(systemName: t.done ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(t.done ? Color.neon : Color.fg3)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            Text(t.text).font(sans(13)).strikethrough(t.done, color: Color.fg3)
+                .foregroundStyle(t.done ? Color.fg3 : Color.fg).lineLimit(2)
+            Spacer(minLength: 4)
+            if on || t.flag {
+                Button { update(t) { $0.flag.toggle() } } label: {
+                    Image(systemName: t.flag ? "flag.fill" : "flag").font(.system(size: 11)).foregroundStyle(t.flag ? Color.hot : Color.fg3)
+                }
+                .help("flag: keep on top")
+            }
+            if on {
+                Button { withAnimation(spring) { todos.removeAll { $0.id == t.id } } } label: {
+                    Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.fg3)
+                }
+                .help("delete")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .card(t.flag ? .hot : .amber, hover: on)
+        .contentShape(Rectangle())
+        .onHover { h in withAnimation(.easeOut(duration: 0.1)) { hover = h ? t.id : nil } }
+    }
+
+    // MARK: notes
+
+    var notesView: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button { fontSize = max(10, fontSize - 1) } label: { Pill(icon: "textformat.size.smaller", text: "", color: .fg2) }
+                Button { fontSize = min(20, fontSize + 1) } label: { Pill(icon: "textformat.size.larger", text: "", color: .fg2) }
+                Caps(text: "\(Int(fontSize))pt")
+                Spacer()
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(text, forType: .string)
+                } label: { Pill(icon: "doc.on.doc", text: "copy all", color: .ice) }
+                Button { withAnimation(spring) { text = "" } } label: { Pill(icon: "trash", text: "clear", color: .hot) }
+                    .help("erase the scratchpad")
+            }
             TextEditor(text: $text)
-                .font(mono(12))
+                .font(mono(fontSize))
                 .foregroundStyle(Color.fg)
                 .scrollContentBackground(.hidden)
                 .padding(8)

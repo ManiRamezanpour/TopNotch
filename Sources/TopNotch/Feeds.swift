@@ -207,11 +207,14 @@ struct Agent: Identifiable {
     }
 
     private func scanLive() {
-        let recent = files(within: 15 * 60)
+        let recent = files(within: 30 * 60)
         var out: [Agent] = []
         for (u, m) in recent where !u.path.contains("/subagents/") {
             guard let (raw, detail, cwd) = Self.tail(u) else { continue }
-            let state: AState = raw == .run && Date().timeIntervalSince(m) > 20 ? .hold : raw  // long tool, or waiting on your approval
+            let age = Date().timeIntervalSince(m)
+            let state: AState = raw == .run && age > 20 ? .hold : raw  // long tool, or waiting on your approval
+            // only what's alive or waiting on you: a log that stopped mid-turn is a closed/crashed session
+            if state == .think && age > 300 || (state == .run || state == .hold) && age > 15 * 60 { continue }
             let subDir = u.deletingPathExtension().path + "/subagents/"
             let subs = recent.filter { $0.0.path.hasPrefix(subDir) && Date().timeIntervalSince($0.1) < 60 }.count
             let name = cwd.map { URL(fileURLWithPath: $0).lastPathComponent } ?? u.deletingLastPathComponent().lastPathComponent
@@ -349,6 +352,29 @@ struct Notif: Identifiable {
         watch()
         // live path: read the banner itself while it's on screen (DB only gets the row once it leaves)
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.q.async { self?.scanBanners() } }
+        Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.q.async { self?.scanDock() } }
+    }
+
+    /// Real unread counts: the red badge on each app's Dock tile ("Telegram": "3"). Missing = no badge / not running.
+    var badges: [String: String] = [:]
+
+    private func scanDock() {
+        guard AXIsProcessTrusted(),
+              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
+        else { return }
+        func get(_ e: AXUIElement, _ k: String) -> AnyObject? {
+            var v: AnyObject?
+            return AXUIElementCopyAttributeValue(e, k as CFString, &v) == .success ? v : nil
+        }
+        var found: [String: String] = [:]
+        for list in get(AXUIElementCreateApplication(pid), kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+            for item in get(list, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+                guard let t = get(item, kAXTitleAttribute) as? String, Self.bannerApps[t] != nil,
+                      let b = get(item, "AXStatusLabel") as? String, !b.isEmpty else { continue }
+                found[t] = b
+            }
+        }
+        DispatchQueue.main.async { if self.badges != found { self.badges = found } }
     }
 
     @ObservationIgnored private var bannerSeen: Set<String>?  // q only; nil = first scan, silent
