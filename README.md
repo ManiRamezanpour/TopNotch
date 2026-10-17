@@ -12,9 +12,9 @@ Native SwiftUI. No dependencies, no Xcode project.
 
 ## Download
 
-**[⬇ TopNotch.zip (latest)](https://github.com/arshiashirzad/TopNotch/releases/latest/download/TopNotch.zip)**: macOS 14+ on Apple Silicon.
+**[⬇ TopNotch.dmg (latest)](https://github.com/arshiashirzad/TopNotch/releases/latest/download/TopNotch.dmg)**: macOS 14+ on Apple Silicon.
 
-Unzip it and drag **TopNotch.app** into Applications. The app isn't notarized, so the first launch is blocked: go to **System Settings → Privacy & Security → Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/TopNotch.app`).
+Open the DMG and drag **TopNotch** onto **Applications**. The app isn't notarized, so the first launch is blocked: go to **System Settings → Privacy & Security → Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/TopNotch.app`).
 
 ## Build
 
@@ -42,7 +42,7 @@ Builds with ad-hoc signatures lose these permissions on every rebuild. To keep t
 ./release.sh 1.1.0 "what changed"
 ```
 
-This builds the app, zips it, tags `v1.1.0` and publishes a GitHub release with the zip attached.
+This builds the app, packages a DMG, tags `v1.1.0` and publishes a GitHub release with the DMG attached.
 
 ## Self-test
 

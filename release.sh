@@ -1,16 +1,18 @@
 #!/bin/zsh
-# Build, zip and publish a GitHub release. Usage: ./release.sh 1.1.0 "what changed"
+# Build, package a .dmg and publish a GitHub release. Usage: ./release.sh 1.1.0 "what changed"
 set -e
 cd "${0:a:h}"
 V=${1:?usage: ./release.sh <version> [notes]}
 [[ -z $(git status --porcelain) ]] || { echo "commit your changes first"; exit 1; }
 VERSION=$V ./build.sh
-ditto -c -k --keepParent /Applications/TopNotch.app TopNotch.zip
+# classic drag-to-install disk image: the app + an Applications shortcut
+STAGE=$(mktemp -d) && cp -R /Applications/TopNotch.app "$STAGE/" && ln -s /Applications "$STAGE/Applications"
+hdiutil create -quiet -volname TopNotch -srcfolder "$STAGE" -ov -format UDZO TopNotch.dmg && rm -rf "$STAGE"
 git tag "v$V" && git push origin "v$V"
-gh release create "v$V" TopNotch.zip --title "TopNotch $V" --notes "${2:-}
+gh release create "v$V" TopNotch.dmg --title "TopNotch $V" --notes "${2:-}
 
 ## Install
-1. Download **TopNotch.zip**, unzip, drag **TopNotch.app** into **Applications**.
+1. Download **TopNotch.dmg**, open it, drag **TopNotch** onto **Applications**.
 2. Open it. macOS will refuse (it's not notarized) — click **Done**.
 3. **System Settings → Privacy & Security** → scroll down → **Open Anyway**.
 
