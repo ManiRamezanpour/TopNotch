@@ -5,9 +5,7 @@ cd "${0:a:h}"
 V=${1:?usage: ./release.sh <version> [notes]}
 [[ -z $(git status --porcelain) ]] || { echo "commit your changes first"; exit 1; }
 VERSION=$V ./build.sh
-# classic drag-to-install disk image: the app + an Applications shortcut
-STAGE=$(mktemp -d) && cp -R /Applications/TopNotch.app "$STAGE/" && ln -s /Applications "$STAGE/Applications"
-hdiutil create -quiet -volname TopNotch -srcfolder "$STAGE" -ov -format UDZO TopNotch.dmg && rm -rf "$STAGE"
+./dmg.sh
 git tag "v$V" && git push origin "v$V"
 gh release create "v$V" TopNotch.dmg --title "TopNotch $V" --notes "${2:-}
 

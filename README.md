@@ -42,7 +42,7 @@ Builds with ad-hoc signatures lose these permissions on every rebuild. To keep t
 ./release.sh 1.1.0 "what changed"
 ```
 
-This builds the app, packages a DMG, tags `v1.1.0` and publishes a GitHub release with the DMG attached.
+This builds the app, packages a styled drag-to-install DMG (`dmg.sh`), tags `v1.1.0` and publishes a GitHub release with the DMG attached.
 
 ## Self-test
 
