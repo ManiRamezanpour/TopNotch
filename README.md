@@ -10,6 +10,12 @@ A geeky Dynamic Island for the MacBook notch. Hover the notch and it springs ope
 
 Native SwiftUI. No dependencies, no Xcode project.
 
+## Download
+
+**[⬇ TopNotch.zip (latest)](https://github.com/arshiashirzad/TopNotch/releases/latest/download/TopNotch.zip)**: macOS 14+ on Apple Silicon.
+
+Unzip it and drag **TopNotch.app** into Applications. The app isn't notarized, so the first launch is blocked: go to **System Settings → Privacy & Security → Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/TopNotch.app`).
+
 ## Build
 
 Requires macOS 14+ on Apple Silicon and the Xcode Command Line Tools.
@@ -29,6 +35,14 @@ This builds a release binary, wraps it in `/Applications/TopNotch.app`, signs it
 | Messages (instant) | Accessibility (reads the banner while it's on screen) |
 
 Builds with ad-hoc signatures lose these permissions on every rebuild. To keep them, create a self-signed code-signing certificate named **TopNotch Dev** in your login keychain; `build.sh` uses it automatically when it's present.
+
+## Release
+
+```bash
+./release.sh 1.1.0 "what changed"
+```
+
+This builds the app, zips it, tags `v1.1.0` and publishes a GitHub release with the zip attached.
 
 ## Self-test
 
