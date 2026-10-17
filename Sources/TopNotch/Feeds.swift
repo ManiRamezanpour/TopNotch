@@ -184,6 +184,20 @@ struct Agent: Identifiable {
     var blockEnd: Date?
 
     @ObservationIgnored var onDone: ((String) -> Void)?
+    @ObservationIgnored private var all: [Agent] = []
+    /// session path → last-activity time when you dismissed it. It comes back only if it does something newer.
+    @ObservationIgnored private var dismissed = (UserDefaults.standard.dictionary(forKey: "dismissed") as? [String: Double] ?? [:])
+        .filter { Date().timeIntervalSince1970 - $0.value < 86400 }
+
+    func dismiss(_ ids: [String]) {
+        for a in live where ids.contains(a.id) { dismissed[a.id] = a.updated.timeIntervalSince1970 }
+        UserDefaults.standard.set(dismissed, forKey: "dismissed")
+        publish()
+    }
+
+    private func publish() {
+        live = all.filter { a in dismissed[a.id].map { a.updated.timeIntervalSince1970 > $0 } ?? true }
+    }
     @ObservationIgnored private var prev: [String: AState] = [:]
     @ObservationIgnored private var cache: [String: (Date, [(String, Date, Int)])] = [:]  // q only
     @ObservationIgnored private let q = DispatchQueue(label: "topnotch.agents", qos: .utility)
@@ -224,7 +238,8 @@ struct Agent: Identifiable {
         DispatchQueue.main.async { [self] in
             for a in out where a.state == .wait && prev[a.id].map({ $0 != .wait }) == true { onDone?(a.project) }
             prev = Dictionary(uniqueKeysWithValues: out.map { ($0.id, $0.state) })
-            live = out
+            all = out
+            publish()
         }
     }
 

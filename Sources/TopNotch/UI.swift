@@ -480,9 +480,16 @@ struct AgentsPane: View {
             HStack(spacing: 6) {
                 Circle().fill(c).frame(width: 5, height: 5).shadow(color: c, radius: 3)
                 Caps(text: "\(title) · \(list.count)", color: c)
+                Spacer()
+                Button { withAnimation(spring) { agents.dismiss(list.map(\.id)) } } label: { Caps(text: "clear") }
+                    .buttonStyle(Press())
+                    .help("hide these until they do something new")
             }
-            .padding(.top, 4).padding(.leading, 2)
-            ForEach(list) { Row(a: $0, tok: agents.tokens[$0.id] ?? 0) }
+            .padding(.top, 4).padding(.horizontal, 2)
+            ForEach(list) { a in
+                Row(a: a, tok: agents.tokens[a.id] ?? 0) { withAnimation(spring) { agents.dismiss([a.id]) } }
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
         }
     }
 
@@ -542,6 +549,7 @@ struct Meter: View {
 
 struct Row: View {
     let a: Agent, tok: Int
+    var dismiss: () -> Void = {}
     @State private var hover = false
 
     var color: Color {
@@ -589,7 +597,16 @@ struct Row: View {
                 .foregroundStyle(Color.ice)
             }
             Text(fmtTok(tok)).font(mono(10, .semibold)).foregroundStyle(Color.fg2)
-            Text(ago(a.updated)).font(mono(9)).foregroundStyle(Color.fg3).frame(width: 26, alignment: .trailing)
+            if hover {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Color.fg2)
+                        .frame(width: 26, height: 18).background(Color.white.opacity(0.08), in: Capsule())
+                }
+                .buttonStyle(Press())
+                .help("remove from list (comes back if it does something new)")
+            } else {
+                Text(ago(a.updated)).font(mono(9)).foregroundStyle(Color.fg3).frame(width: 26, alignment: .trailing)
+            }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .card(color, hover: hover)
