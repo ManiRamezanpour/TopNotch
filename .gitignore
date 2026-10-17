@@ -1,0 +1,5 @@
+.build/
+TopNotch.zip
+.DS_Store
+*.p12
+*.pem

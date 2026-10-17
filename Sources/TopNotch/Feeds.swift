@@ -1,0 +1,466 @@
+import AppKit
+import SQLite3
+import ApplicationServices
+
+// MARK: - Music (Spotify + Apple Music over AppleScript)
+
+@Observable final class Music {
+    var app: String?
+    var playing = false
+    var title = ""
+    var artist = ""
+    var album = ""
+    var pos: Double = 0
+    var dur: Double = 1
+    var volume: Double = 50
+    var stamp = Date()
+    var art: NSImage?
+    var lyrics: [(t: Double, text: String)] = []   // synced, from lrclib.net
+    var island = UserDefaults.standard.object(forKey: "island") as? Bool ?? true {  // live lyric under the notch
+        didSet { UserDefaults.standard.set(island, forKey: "island") }
+    }
+    /// Seconds to show a line early — AppleScript's playhead lags a hair. Tune if lines feel late/early.
+    static let lyricLead = 0.3
+
+    @ObservationIgnored private let q = DispatchQueue(label: "topnotch.music")
+    @ObservationIgnored private var artKey = ""          // touched only on q
+    @ObservationIgnored private var scripts: [String: NSAppleScript] = [:]  // NSAppleScript is not thread-safe: q only
+    private static let bundle = ["Spotify": "com.spotify.client", "Music": "com.apple.Music"]
+
+    init() {
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.poll() }
+        poll()
+    }
+
+    /// Smoothly interpolated playhead for the UI.
+    func now(_ d: Date) -> Double { playing ? min(dur, pos + d.timeIntervalSince(stamp)) : pos }
+
+    func poll() {
+        q.async { [weak self] in
+            guard let self else { return }
+            var best: (String, [String])?
+            for app in ["Spotify", "Music"]
+            where !NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundle[app]!).isEmpty {
+                // checking running first so AppleScript never launches the player
+                guard let r = run(Self.query(app)) else { continue }
+                let f = r.components(separatedBy: "|||")
+                guard f.count == 8 else { continue }
+                if best == nil || f[0] == "playing" { best = (app, f) }
+            }
+            var newArt: NSImage??
+            if let (app, f) = best, artKey != app + f[1] + f[3] {
+                artKey = app + f[1] + f[3]
+                fetchLyrics(title: f[1], artist: f[2], dur: Self.num(f[5]), key: artKey)
+                newArt = .some(app == "Spotify"
+                    ? URL(string: f[6]).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
+                    : (try? runDescriptor("tell application \"Music\" to get raw data of artwork 1 of current track"))
+                        .flatMap { NSImage(data: $0.data) })
+            }
+            DispatchQueue.main.async {
+                if let a = newArt { self.art = a }
+                guard let (app, f) = best else { self.app = nil; self.playing = false; return }
+                self.app = app
+                self.playing = f[0] == "playing"
+                (self.title, self.artist, self.album) = (f[1], f[2], f[3])
+                self.pos = Self.num(f[4]); self.dur = max(1, Self.num(f[5])); self.volume = Self.num(f[7])
+                self.stamp = Date()
+            }
+        }
+    }
+
+    /// Current line index, its text and how far through it we are (0...1).
+    func line(at t: Double) -> (i: Int, text: String, p: Double)? {
+        let t = t + Self.lyricLead
+        guard let i = lyrics.lastIndex(where: { $0.t <= t }) else { return nil }
+        let end = i + 1 < lyrics.count ? lyrics[i + 1].t : lyrics[i].t + 5
+        return (i, lyrics[i].text, min(1, max(0, (t - lyrics[i].t) / max(0.1, end - lyrics[i].t))))
+    }
+
+    @ObservationIgnored private var lyricsKey = ""
+    private func fetchLyrics(title: String, artist: String, dur: Double, key: String) {
+        DispatchQueue.main.async { self.lyrics = []; self.lyricsKey = key }
+        var c = URLComponents(string: "https://lrclib.net/api/search")!
+        c.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist)]
+        var req = URLRequest(url: c.url!)
+        req.setValue("TopNotch/1.0 (personal notch app)", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: req) { data, _, _ in
+            let hits = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]] ?? [])
+                .filter { $0["syncedLyrics"] is String }
+            let best = hits.min { abs(($0["duration"] as? Double ?? 0) - dur) < abs(($1["duration"] as? Double ?? 0) - dur) }
+            let lines = Self.lrc(best?["syncedLyrics"] as? String ?? "")
+            DispatchQueue.main.async { if self.lyricsKey == key { self.lyrics = lines } }
+        }.resume()
+    }
+
+    /// "[01:23.45] text" → (83.45, "text")
+    static func lrc(_ s: String) -> [(t: Double, text: String)] {
+        s.split(separator: "\n").compactMap { l in
+            guard l.hasPrefix("["), let close = l.firstIndex(of: "]") else { return nil }
+            let ts = l[l.index(after: l.startIndex)..<close].split(separator: ":")
+            guard ts.count == 2, let m = Double(ts[0]), let sec = Double(ts[1]) else { return nil }
+            return (m * 60 + sec, l[l.index(after: close)...].trimmingCharacters(in: .whitespaces))
+        }
+    }
+
+    func send(_ cmd: String) {
+        guard let app else { return }
+        q.async { [weak self] in
+            _ = self?.run("tell application \"\(app)\" to \(cmd)")
+            self?.poll()
+        }
+    }
+    func toggle() { playing.toggle(); stamp = Date(); send("playpause") }
+    func seek(_ t: Double) { pos = t; stamp = Date(); send("set player position to \(t)") }
+    func setVolume(_ v: Double) { volume = v; send("set sound volume to \(Int(v))") }
+
+    private func runDescriptor(_ src: String) throws -> NSAppleEventDescriptor {
+        let s = scripts[src] ?? NSAppleScript(source: src)!
+        scripts[src] = s
+        var err: NSDictionary?
+        let d = s.executeAndReturnError(&err)
+        if let err { throw NSError(domain: "applescript", code: 1, userInfo: err as? [String: Any]) }
+        return d
+    }
+    private func run(_ src: String) -> String? { (try? runDescriptor(src))?.stringValue }
+
+    private static func num(_ s: String) -> Double { Double(s.replacingOccurrences(of: ",", with: ".")) ?? 0 }
+
+    private static func query(_ app: String) -> String {
+        let dur = app == "Spotify" ? "((duration of t) / 1000)" : "(duration of t)"
+        let art = app == "Spotify" ? "(artwork url of t)" : "\"\""
+        return """
+        tell application "\(app)"
+            if player state is stopped then return "stopped"
+            set t to current track
+            return (player state as string) & "|||" & (name of t) & "|||" & (artist of t) & "|||" & (album of t) & "|||" & (player position as string) & "|||" & (\(dur) as string) & "|||" & \(art) & "|||" & (sound volume as string)
+        end tell
+        """
+    }
+}
+
+// MARK: - Clipboard history (memory only, skips password-manager copies)
+
+@Observable final class Clip {
+    var items: [String] = []
+    @ObservationIgnored private var count = NSPasteboard.general.changeCount
+    private static let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+
+    init() {
+        Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.tick() }
+    }
+
+    private func tick() {
+        let pb = NSPasteboard.general
+        guard pb.changeCount != count else { return }
+        count = pb.changeCount
+        guard pb.types?.contains(Self.concealed) != true,
+              let s = pb.string(forType: .string),
+              !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        items.removeAll { $0 == s }
+        items.insert(s, at: 0)
+        if items.count > 50 { items.removeLast() }
+    }
+
+    func copy(_ s: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(s, forType: .string)
+    }
+}
+
+// MARK: - Claude Code agents + usage, read straight from ~/.claude/projects/*.jsonl
+
+enum AState: String { case run = "RUN", hold = "HOLD", think = "THNK", wait = "YOU" }
+
+struct Agent: Identifiable {
+    let id: String, project: String, state: AState, detail: String, updated: Date, subs: Int
+}
+
+@Observable final class Agents {
+    var live: [Agent] = []
+    var tokens: [String: Int] = [:]  // per session file
+    var block = 0
+    var peak = 1
+    var week = 0
+    var blockEnd: Date?
+
+    @ObservationIgnored var onDone: ((String) -> Void)?
+    @ObservationIgnored private var prev: [String: AState] = [:]
+    @ObservationIgnored private var cache: [String: (Date, [(String, Date, Int)])] = [:]  // q only
+    @ObservationIgnored private let q = DispatchQueue(label: "topnotch.agents", qos: .utility)
+    static let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects")
+
+    init() {
+        Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.q.async { self?.scanLive() } }
+        Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.q.async { self?.scanUsage() } }
+        q.async { self.scanLive(); self.scanUsage() }
+    }
+
+    private func files(within s: TimeInterval) -> [(URL, Date)] {
+        let cut = Date().addingTimeInterval(-s)
+        let en = FileManager.default.enumerator(at: Self.root, includingPropertiesForKeys: [.contentModificationDateKey])
+        return (en?.allObjects as? [URL] ?? []).compactMap { u in
+            guard u.pathExtension == "jsonl",
+                  let m = try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+                  m > cut else { return nil }
+            return (u, m)
+        }
+    }
+
+    private func scanLive() {
+        let recent = files(within: 15 * 60)
+        var out: [Agent] = []
+        for (u, m) in recent where !u.path.contains("/subagents/") {
+            guard let (raw, detail, cwd) = Self.tail(u) else { continue }
+            let state: AState = raw == .run && Date().timeIntervalSince(m) > 20 ? .hold : raw  // long tool, or waiting on your approval
+            let subDir = u.deletingPathExtension().path + "/subagents/"
+            let subs = recent.filter { $0.0.path.hasPrefix(subDir) && Date().timeIntervalSince($0.1) < 60 }.count
+            let name = cwd.map { URL(fileURLWithPath: $0).lastPathComponent } ?? u.deletingLastPathComponent().lastPathComponent
+            out.append(Agent(id: u.path, project: name, state: state, detail: detail, updated: m, subs: subs))
+        }
+        out.sort { $0.updated > $1.updated }
+        DispatchQueue.main.async { [self] in
+            for a in out where a.state == .wait && prev[a.id].map({ $0 != .wait }) == true { onDone?(a.project) }
+            prev = Dictionary(uniqueKeysWithValues: out.map { ($0.id, $0.state) })
+            live = out
+        }
+    }
+
+    /// Status from the last real message in the session log.
+    static func tail(_ u: URL) -> (AState, String, String?)? {
+        guard let h = try? FileHandle(forReadingFrom: u) else { return nil }
+        defer { try? h.close() }
+        let size = (try? h.seekToEnd()) ?? 0
+        try? h.seek(toOffset: size > 262_144 ? size - 262_144 : 0)
+        guard let data = try? h.readToEnd(), let text = String(data: data, encoding: .utf8) else { return nil }
+        for line in text.split(separator: "\n").reversed() {
+            guard let d = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let s = status(d) else { continue }
+            return (s.0, clean(s.1), d["cwd"] as? String)
+        }
+        return nil
+    }
+
+    static func status(_ d: [String: Any]) -> (AState, String)? {
+        guard let type = d["type"] as? String, type == "assistant" || type == "user",
+              d["isSidechain"] as? Bool != true, d["isMeta"] as? Bool != true,
+              let msg = d["message"] as? [String: Any] else { return nil }
+        let blocks = msg["content"] as? [[String: Any]] ?? []
+        if type == "user" {
+            let text = msg["content"] as? String ?? blocks.last?["text"] as? String
+            if blocks.last?["type"] as? String == "tool_result" { return (.think, "chewing on tool output") }
+            if text?.hasPrefix("[Request interrupted") == true { return (.wait, "interrupted") }
+            return (.think, text ?? "")
+        }
+        guard let last = blocks.last else { return nil }
+        switch last["type"] as? String {
+        case "tool_use":
+            let inp = last["input"] as? [String: Any] ?? [:]
+            let arg = ["description", "command", "file_path", "pattern", "url", "prompt", "query"]
+                .lazy.compactMap { inp[$0] as? String }.first ?? ""
+            return (.run, "\(last["name"] as? String ?? "tool") › \(arg)")
+        case "text":
+            return (msg["stop_reason"] as? String == "end_turn" ? .wait : .think, last["text"] as? String ?? "")
+        default:
+            return (.think, "thinking…")
+        }
+    }
+
+    private static func clean(_ s: String) -> String {
+        String(s.split(whereSeparator: \.isNewline).first ?? "").trimmingCharacters(in: .whitespaces).prefix(140).description
+    }
+
+    // ponytail: re-parses a whole changed log every 30s; tail-offset caching if logs get huge.
+    private func scanUsage() {
+        var all: [String: (Date, Int)] = [:]
+        var per: [String: Int] = [:]
+        for (u, m) in files(within: 7 * 86400) {
+            let entries: [(String, Date, Int)]
+            if let c = cache[u.path], c.0 == m { entries = c.1 } else { entries = Self.usage(u); cache[u.path] = (m, entries) }
+            let key = u.path.contains("/subagents/")
+                ? u.deletingLastPathComponent().deletingLastPathComponent().path + ".jsonl" : u.path
+            for (id, t, n) in entries { all[id] = (t, n); per[key, default: 0] += n }
+        }
+        let b = Self.blocks(all.values.filter { $0.0 > Date().addingTimeInterval(-7 * 86400) })
+        DispatchQueue.main.async { [self] in
+            tokens = per
+            week = b.week; peak = max(b.peak, 1)
+            (block, blockEnd) = b.current.map { ($0.1, $0.0) } ?? (0, nil)
+        }
+    }
+
+    /// Claude's 5h windows: a block starts at the hour of the first message after the previous block expired.
+    static func blocks(_ es: [(Date, Int)]) -> (current: (Date, Int)?, peak: Int, week: Int) {
+        var bs: [(Date, Int)] = []
+        for (t, n) in es.sorted(by: { $0.0 < $1.0 }) {
+            if let b = bs.last, t < b.0.addingTimeInterval(5 * 3600) { bs[bs.count - 1].1 += n }
+            else { bs.append((Calendar.current.dateInterval(of: .hour, for: t)!.start, n)) }
+        }
+        let cur = bs.last.flatMap { Date() < $0.0.addingTimeInterval(5 * 3600) ? ($0.0.addingTimeInterval(5 * 3600), $0.1) : nil }
+        return (cur, bs.map(\.1).max() ?? 0, bs.map(\.1).reduce(0, +))
+    }
+
+    private static let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f
+    }()
+
+    /// (message id, time, tokens) — input + cache writes + output; cache reads are excluded (they're ~free).
+    static func usage(_ u: URL) -> [(String, Date, Int)] {
+        guard let data = try? Data(contentsOf: u), let text = String(data: data, encoding: .utf8) else { return [] }
+        var seen = Set<String>(), out: [(String, Date, Int)] = []
+        for line in text.split(separator: "\n") where line.contains("\"usage\"") {
+            guard let d = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let msg = d["message"] as? [String: Any], let id = msg["id"] as? String,
+                  let us = msg["usage"] as? [String: Any],
+                  let t = (d["timestamp"] as? String).flatMap(iso.date(from:)),
+                  seen.insert(id).inserted else { continue }
+            let n = ["input_tokens", "cache_creation_input_tokens", "output_tokens"].reduce(0) { $0 + (us[$1] as? Int ?? 0) }
+            out.append((id, t, n))
+        }
+        return out
+    }
+}
+
+// MARK: - WhatsApp / Telegram notifications, read from Notification Center's own DB (needs Full Disk Access)
+
+struct Notif: Identifiable {
+    let id = UUID()
+    let rec: Int64, bundle: String, title: String, body: String, date: Date
+    var tag: String { bundle.lowercased().contains("whatsapp") ? "WA" : "TG" }
+}
+
+@Observable final class Notifs {
+    var items: [Notif] = []
+    var denied = false
+    var unseen = 0   // badge on the msgs tab
+    @ObservationIgnored var onNew: ((Notif) -> Void)?
+    // q only. Keyed by row id + blob, NOT "id > last": apps delete read notifications and sqlite reuses the max rowid.
+    @ObservationIgnored private var seen: Set<String>?   // nil = first read, load history silently
+    @ObservationIgnored private let q = DispatchQueue(label: "topnotch.notifs")
+    static let bundles = ["net.whatsapp.whatsapp", "desktop.whatsapp", "ru.keepcoder.telegram", "org.telegram.desktop"]
+    static let db = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Group Containers/group.com.apple.usernoted/db2/db").path
+
+    @ObservationIgnored private var stream: FSEventStreamRef?
+
+    init() {
+        // fallback in case FSEvents stays quiet for the protected folder
+        Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.q.async { self?.poll() } }
+        q.async { self.poll() }
+        watch()
+        // live path: read the banner itself while it's on screen (DB only gets the row once it leaves)
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.q.async { self?.scanBanners() } }
+    }
+
+    @ObservationIgnored private var bannerSeen: Set<String>?  // q only; nil = first scan, silent
+    static let bannerApps = ["Telegram": "ru.keepcoder.Telegram", "WhatsApp": "net.whatsapp.WhatsApp"]
+
+    /// NotificationCenter window → … → AXGroup[AXNotificationCenterBanner] desc="App, title, sub, body" with
+    /// AXStaticText children id=title/subtitle/body. Needs Accessibility.
+    private func scanBanners() {
+        guard AXIsProcessTrusted(),
+              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.notificationcenterui").first?.processIdentifier
+        else { return }
+        func get(_ e: AXUIElement, _ k: String) -> AnyObject? {
+            var v: AnyObject?
+            return AXUIElementCopyAttributeValue(e, k as CFString, &v) == .success ? v : nil
+        }
+        let wins = (get(AXUIElementCreateApplication(pid), kAXWindowsAttribute) as? [AXUIElement] ?? [])
+            .filter { get($0, kAXTitleAttribute) as? String == "Notification Center" }
+        var banners: [AXUIElement] = [], stack = wins, budget = 200
+        while let e = stack.popLast(), budget > 0 {
+            budget -= 1
+            if get(e, kAXSubroleAttribute) as? String == "AXNotificationCenterBanner" { banners.append(e); continue }
+            stack += get(e, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        }
+        let silent = bannerSeen == nil || banners.count > 3  // >3 = you opened the NC panel, not new pings
+        var seen = bannerSeen ?? []
+        for b in banners {
+            guard let id = get(b, "AXIdentifier") as? String, seen.insert(id).inserted, !silent,
+                  let app = (get(b, kAXDescriptionAttribute) as? String)?.components(separatedBy: ", ").first,
+                  let bundle = Self.bannerApps[app] else { continue }
+            var f: [String: String] = [:]
+            for t in get(b, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+                if let k = get(t, "AXIdentifier") as? String { f[k] = get(t, kAXValueAttribute) as? String }
+            }
+            let title = [f["title"], f["subtitle"]].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+            let n = Notif(rec: -1, bundle: bundle, title: title, body: f["body"] ?? "", date: Date())
+            DispatchQueue.main.async { self.add([n], ping: true) }
+        }
+        bannerSeen = seen
+    }
+
+    /// Both paths land here; the DB copy of a banner we already showed is dropped.
+    private func add(_ ns: [Notif], ping: Bool) {
+        let fresh = ns.filter { n in
+            n.rec < 0 || !items.contains {  // banner (rec -1) always wins; a DB row only duplicates a recent banner
+                $0.rec < 0 && $0.title == n.title && $0.body == n.body && abs($0.date.timeIntervalSince(n.date)) < 120
+            }
+        }
+        guard !fresh.isEmpty else { return }
+        items = Array((fresh + items).prefix(60))
+        if ping { unseen += fresh.count }
+        if ping, let n = fresh.first { onNew?(n) }
+    }
+
+    /// Re-read the instant usernoted writes db / db-wal, instead of waiting for the timer.
+    private func watch() {
+        var ctx = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(),
+                                       retain: nil, release: nil, copyDescription: nil)
+        let dir = (Self.db as NSString).deletingLastPathComponent
+        guard let st = FSEventStreamCreate(nil, { _, info, _, _, _, _ in
+            Unmanaged<Notifs>.fromOpaque(info!).takeUnretainedValue().poll()  // already on q
+        }, &ctx, [dir] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.03,
+            FSEventStreamCreateFlags(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)) else { return }
+        FSEventStreamSetDispatchQueue(st, q)
+        FSEventStreamStart(st)
+        stream = st
+    }
+
+    private func poll() {
+        var h: OpaquePointer?, st: OpaquePointer?
+        defer { sqlite3_finalize(st); sqlite3_close(h) }
+        let ids = Self.bundles.map { "'\($0)'" }.joined(separator: ",")
+        let sql = """
+            SELECT r.rec_id, a.identifier, r.data FROM record r JOIN app a ON a.app_id = r.app_id
+            WHERE lower(a.identifier) IN (\(ids)) ORDER BY r.rec_id DESC LIMIT 25
+            """
+        guard sqlite3_open_v2(Self.db, &h, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+              sqlite3_prepare_v2(h, sql, -1, &st, nil) == SQLITE_OK else {
+            DispatchQueue.main.async { self.denied = true }
+            return
+        }
+        let silent = seen == nil
+        var seen = self.seen ?? [], new: [Notif] = []
+        while sqlite3_step(st) == SQLITE_ROW {
+            guard let b = sqlite3_column_text(st, 1), let blob = sqlite3_column_blob(st, 2) else { continue }
+            let data = Data(bytes: blob, count: Int(sqlite3_column_bytes(st, 2)))
+            let id = sqlite3_column_int64(st, 0)
+            guard seen.insert("\(id):\(data.hashValue)").inserted,
+                  let n = Self.parse(id: id, bundle: String(cString: b), data: data) else { continue }
+            new.append(n)
+        }
+        self.seen = seen
+        new.sort { $0.date > $1.date }
+        DispatchQueue.main.async {
+            self.denied = false
+            self.add(new, ping: !silent)
+        }
+    }
+
+    /// Record blob is a binary plist: { date: <abs time>, req: { titl, subt, body } }.
+    static func parse(id: Int64, bundle: String, data: Data) -> Notif? {
+        guard let pl = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let req = pl["req"] as? [String: Any] else { return nil }
+        let title = [req["titl"], req["subt"]].compactMap { $0 as? String }.filter { !$0.isEmpty }.joined(separator: " · ")
+        return Notif(rec: id, bundle: bundle, title: title, body: req["body"] as? String ?? "",
+                     date: (pl["date"] as? Double).map(Date.init(timeIntervalSinceReferenceDate:)) ?? Date())
+    }
+
+    func open(_ n: Notif) {
+        if let u = NSWorkspace.shared.urlForApplication(withBundleIdentifier: n.bundle) { NSWorkspace.shared.open(u) }
+    }
+}
+
+func fmtTok(_ n: Int) -> String {
+    n >= 1_000_000 ? String(format: "%.1fM", Double(n) / 1e6) : n >= 1000 ? String(format: "%.0fk", Double(n) / 1e3) : "\(n)"
+}
