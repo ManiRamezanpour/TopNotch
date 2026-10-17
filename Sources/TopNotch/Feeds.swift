@@ -425,13 +425,13 @@ struct Notif: Identifiable {
             }
             let title = [f["title"], f["subtitle"]].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
             let n = Notif(rec: -1, bundle: bundle, title: title, body: f["body"] ?? "", date: Date())
-            DispatchQueue.main.async { self.add([n], ping: true) }
+            DispatchQueue.main.async { self.add([n], ping: true, count: true) }
         }
         bannerSeen = seen
     }
 
     /// Both paths land here; the DB copy of a banner we already showed is dropped.
-    private func add(_ ns: [Notif], ping: Bool) {
+    private func add(_ ns: [Notif], ping: Bool, count: Bool) {
         let fresh = ns.filter { n in
             n.rec < 0 || !items.contains {  // banner (rec -1) always wins; a DB row only duplicates a recent banner
                 $0.rec < 0 && $0.title == n.title && $0.body == n.body && abs($0.date.timeIntervalSince(n.date)) < 120
@@ -439,7 +439,7 @@ struct Notif: Identifiable {
         }
         guard !fresh.isEmpty else { return }
         items = Array((fresh + items).prefix(60))
-        if ping { unseen += fresh.count }
+        if count { unseen += fresh.count }
         if ping, let n = fresh.first { onNew?(n) }
     }
 
@@ -484,7 +484,9 @@ struct Notif: Identifiable {
         new.sort { $0.date > $1.date }
         DispatchQueue.main.async {
             self.denied = false
-            self.add(new, ping: !silent)
+            // With Accessibility, only an on-screen banner pops the card: macOS hides banners under
+            // Do Not Disturb / Focus, so the notch stays quiet too. The DB still logs + counts them.
+            self.add(new, ping: !silent && !AXIsProcessTrusted(), count: !silent)
         }
     }
 
