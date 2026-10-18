@@ -49,3 +49,7 @@ This builds the app, packages a styled drag-to-install DMG (`dmg.sh`), tags `v1.
 ```bash
 /Applications/TopNotch.app/Contents/MacOS/TopNotch --selftest
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
