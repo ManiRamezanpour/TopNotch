@@ -158,12 +158,12 @@ struct NotchView: View {
     var size: CGSize {
         if s.open { return AppDelegate.openSize }
         let w = s.notch.width + 2 * (96 + flare)  // wings always out: the messages section lives there
-        if toast != nil { return CGSize(width: max(w, 560), height: s.notch.height + 78) }
+        if toast != nil { return CGSize(width: max(w, AppDelegate.toast.width), height: s.notch.height + AppDelegate.toast.height) }
         return lyricIsland ? CGSize(width: max(w, 620), height: s.notch.height + 56) : CGSize(width: w, height: s.notch.height)
     }
 
     var body: some View {
-        let shape = NotchShape(top: flare, bottom: s.open ? 28 : toast != nil ? 26 : lyricIsland ? 24 : 10)
+        let shape = NotchShape(top: flare, bottom: s.open ? 28 : toast != nil ? 18 : lyricIsland ? 24 : 10)
         ZStack(alignment: .top) {
             ZStack(alignment: .top) {
                 Color.black
@@ -229,13 +229,7 @@ struct Collapsed: View {
     }
 
     @ViewBuilder var left: some View {
-        if let f = s.flash {
-            HStack(spacing: 5) {
-                Image(systemName: f.icon).font(.system(size: 10, weight: .bold))
-                Caps(text: f.app, color: f.color)
-            }
-            .foregroundStyle(f.color)
-        } else {
+        do {
             HStack(spacing: 10) {
                 let yours = agents.live.filter { $0.state == .wait }.count
                 if agents.live.count > yours { count("sparkle", agents.live.count - yours, .neon, pulse: true) }
@@ -262,9 +256,7 @@ struct Collapsed: View {
     }
 
     @ViewBuilder var right: some View {
-        if s.flash != nil {
-            Caps(text: "now")
-        } else {
+        do {
             HStack(spacing: 10) {
                 MsgBadge(icon: "paperplane.fill", color: .tg, count: notifs.badges["Telegram"])
                 MsgBadge(icon: "phone.bubble.fill", color: .wa, count: notifs.badges["WhatsApp"])
@@ -288,37 +280,35 @@ struct MsgBadge: View {
     }
 }
 
-/// The eye-catcher: app-colored avatar with a ripple, sender, two lines of message, countdown hairline.
+/// Slim heads-up under the notch: who + which app, never the message text. Touch it with the pointer to dismiss.
 struct Toast: View {
     let f: Flash
     @State private var drain = false
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 9) {
+            Spacer(minLength: 0)
             ZStack {
-                Circle().stroke(f.color, lineWidth: 2)
-                    .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.7 : 1).opacity(on ? 0 : 0.8) }
+                Circle().stroke(f.color, lineWidth: 1.5)
+                    .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.8 : 1).opacity(on ? 0 : 0.8) }
                         animation: { on in on ? .easeOut(duration: 1.2) : .linear(duration: 0.01) }
                 Circle().fill(LinearGradient(colors: [f.color, f.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
-                Image(systemName: f.icon).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                Image(systemName: f.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
             }
-            .frame(width: 42, height: 42)
-            .shadow(color: f.color.opacity(0.75), radius: 12)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(f.title).font(sans(14, .bold)).foregroundStyle(.white).lineLimit(1)
-                Text(f.body).font(sans(13)).foregroundStyle(Color.fg).lineLimit(2).fixedSize(horizontal: false, vertical: true)
-            }
+            .frame(width: 24, height: 24)
+            .shadow(color: f.color.opacity(0.75), radius: 8)
+            Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+            Caps(text: f.body, color: f.color)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 4)
-        .frame(height: 64)
+        .padding(.horizontal, 6)
+        .frame(height: 32)
         .overlay(alignment: .bottom) {
-            Capsule().fill(f.color.opacity(0.8)).frame(height: 2)
+            Capsule().fill(f.color.opacity(0.7)).frame(height: 1.5)
                 .scaleEffect(x: drain ? 0 : 1, anchor: .leading)
-                .padding(.horizontal, 30)
+                .padding(.horizontal, 24)
         }
-        .padding(.bottom, 10)
+        .padding(.bottom, 8)
         .onAppear { withAnimation(.linear(duration: f.secs)) { drain = true } }
     }
 }

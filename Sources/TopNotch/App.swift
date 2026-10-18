@@ -33,6 +33,7 @@ final class NotchPanel: NSPanel {
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     static let canvas = CGSize(width: 860, height: 340)  // transparent window; the shape animates inside it
     static let openSize = CGSize(width: 760, height: 280)
+    static let toast = CGSize(width: 440, height: 40)  // the strip under the notch
 
     let state = NotchState()
     let music = Music()
@@ -41,6 +42,7 @@ final class NotchPanel: NSPanel {
     let notifs = Notifs()
     var panel: NotchPanel!
     var closeWork: DispatchWorkItem?
+    var inToast = false  // pointer was already over the toast; only a fresh touch dismisses it
 
     func applicationDidFinishLaunching(_ n: Notification) {
         panel = NotchPanel(contentRect: .init(origin: .zero, size: Self.canvas),
@@ -82,11 +84,13 @@ final class NotchPanel: NSPanel {
         agents.onDone = { [weak self] name in
             NSSound(named: "Glass")?.play()
             self?.ping(Flash(icon: "checkmark.seal.fill", color: .neon, app: "Claude Code", title: name,
-                             body: "Finished — your turn", tab: .agents, secs: 5))
+                             body: "done · your turn", tab: .agents, secs: 5))
         }
         notifs.onNew = { [weak self] n in
-            self?.ping(Flash(icon: n.icon, color: n.brand, app: n.appName, title: n.title.isEmpty ? n.appName : n.title,
-                             body: n.body, tab: .msgs, secs: 7))
+            // who texted, never what: "Mani → arshyrzd" (Telegram multi-account) → "Mani"
+            let who = n.title.components(separatedBy: " → ").first ?? n.title
+            self?.ping(Flash(icon: n.icon, color: n.brand, app: n.appName, title: who.isEmpty ? n.appName : who,
+                             body: n.appName, tab: .msgs, secs: 7))
         }
 
         let ev = NSAppleEventManager.shared().currentAppleEvent
@@ -117,8 +121,18 @@ final class NotchPanel: NSPanel {
         panel.setFrame(NSRect(x: f.midX - c.width / 2, y: f.maxY - c.height, width: c.width, height: c.height), display: true)
     }
 
+    var toastRect: NSRect {
+        let f = panel.frame, t = Self.toast
+        return NSRect(x: f.midX - t.width / 2, y: f.maxY - state.notch.height - t.height, width: t.width, height: t.height)
+    }
+
     func track() {
         let p = NSEvent.mouseLocation, f = panel.frame
+        if state.flash != nil, !state.open {  // touch-and-go: pointer entering the toast clears it
+            let inside = toastRect.contains(p)
+            if inside && !inToast { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { state.flash = nil } }
+            inToast = inside
+        }
         let size = state.open ? Self.openSize : CGSize(width: state.notch.width + 40, height: state.notch.height)
         let slack: CGFloat = state.open ? 18 : 2
         let hot = NSRect(x: f.midX - size.width / 2, y: f.maxY - size.height, width: size.width, height: size.height)
@@ -145,6 +159,7 @@ final class NotchPanel: NSPanel {
     }
 
     func ping(_ f: Flash) {
+        inToast = toastRect.contains(NSEvent.mouseLocation)  // don't insta-dismiss if the pointer is already parked there
         withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { state.flash = f }
         DispatchQueue.main.asyncAfter(deadline: .now() + f.secs) { [weak self] in
             MainActor.assumeIsolated {
