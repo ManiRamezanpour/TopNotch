@@ -725,8 +725,8 @@ struct LyricLine: View {
             .overlay {
                 Text(text).font(f)
                     .foregroundStyle(LinearGradient(colors: [.neon, .ice, .hot], startPoint: .leading, endPoint: .trailing))
-                    .shadow(color: .neon.opacity(0.55), radius: size / 5)
                     .mask(alignment: .leading) { GeometryReader { g in Rectangle().frame(width: g.size.width * p) } }
+                    .shadow(color: .neon.opacity(0.55), radius: size / 5)
             }
             .lineLimit(1)
             .minimumScaleFactor(0.4)
