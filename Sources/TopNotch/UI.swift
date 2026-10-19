@@ -57,6 +57,7 @@ let symbols = Tab.allCases.map(\.icon) + [
     "xmark", "note.text", "textformat.size.smaller", "textformat.size.larger",
     "heart.fill", "flame.fill", "eye", "figure.mind.and.body", "hand.raised.fingers.spread", "figure.stand", "drop.fill",
     "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
+    "hand.raised.fill", "hand.raised.fingers.spread.fill",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.

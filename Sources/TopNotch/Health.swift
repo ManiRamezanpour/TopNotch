@@ -152,10 +152,22 @@ struct SideView: View {
             TimelineView(.animation(paused: !idle)) { tl in
                 let blob = EdgeBlob(w: g.w, h: g.h, r: g.r, f: g.f, bulge: idle ? 14 * side.magnet : 0, bulgeY: side.pullY,
                                     wobble: idle ? 1.4 : 0, t: tl.date.timeIntervalSinceReferenceDate)
-                blob.fill(LinearGradient(colors: [Color(white: 0.09), .black], startPoint: .leading, endPoint: .trailing))
-                    .overlay(blob.stroke(Color.white.opacity(idle ? 0.18 : 0.10), lineWidth: 0.8))
-                    .shadow(color: .black.opacity(0.45), radius: 10, x: -2)
-                    .shadow(color: .coral.opacity(idle ? 0.25 * side.magnet : 0.18), radius: 14)
+                // same skin as the island: black → panel gradient, accent glow from below, dot grid, glowing rim
+                ZStack {
+                    Color.black
+                    Group {
+                        LinearGradient(colors: [.panel, .black], startPoint: .leading, endPoint: .trailing)
+                        RadialGradient(colors: [Color.coral.opacity(0.3), .clear], center: UnitPoint(x: 0.4, y: 1.05),
+                                       startRadius: 0, endRadius: 260)
+                        SideDots()
+                    }
+                    .opacity(idle ? 0 : 1)
+                }
+                .clipShape(blob)
+                .overlay(blob.stroke(LinearGradient(colors: [Color.coral.opacity(idle ? 0.2 + 0.5 * side.magnet : 0.5), .clear],
+                                                    startPoint: .leading, endPoint: .trailing), lineWidth: 1))
+                .shadow(color: .coral.opacity(idle ? 0.35 * side.magnet : 0.22), radius: 22)
+                .shadow(color: .black.opacity(0.5), radius: 12, x: -3)
             }
 
             Group {
@@ -171,7 +183,7 @@ struct SideView: View {
         }
         .frame(width: c.width, height: c.height)
         .foregroundStyle(Color.fg)
-        .animation(.spring(response: 0.45, dampingFraction: 0.76), value: side.mode)
+        .animation(spring, value: side.mode)   // the island's spring
         .animation(.spring(response: 0.3, dampingFraction: 0.55), value: side.magnet)
     }
 
@@ -179,15 +191,10 @@ struct SideView: View {
         TimelineView(.animation) { tl in
             let left = max(0, side.ends.timeIntervalSince(tl.date))
             HStack(spacing: 14) {
-                ZStack {
-                    Circle().stroke(Color.white.opacity(0.1), lineWidth: 3)
-                    Circle().trim(from: 0, to: left / Side.hold)
-                        .stroke(Color.coral, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                    Image(systemName: r.icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.coral)
-                }
-                .frame(width: 48, height: 48)
-                .shadow(color: .coral.opacity(0.5), radius: 8)
+                ExerciseArt(id: r.id, t: tl.date.timeIntervalSinceReferenceDate, progress: 1 - left / Side.hold)
+                    .frame(width: 56, height: 56)
+                    .background(Color.coral.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.coral.opacity(0.25), lineWidth: 0.5))
                 VStack(alignment: .leading, spacing: 3) {
                     Caps(text: "health break · \(Int(left.rounded(.up)))s", color: .coral)
                     Text(r.name).font(sans(16, .bold)).foregroundStyle(.white)
@@ -196,7 +203,12 @@ struct SideView: View {
                 Spacer(minLength: 0)
             }
             .frame(maxHeight: .infinity)
-            .padding(.leading, 18)
+            .padding(.leading, 16)
+            .overlay(alignment: .bottom) {
+                Capsule().fill(Color.coral.opacity(0.75)).frame(height: 1.5)
+                    .scaleEffect(x: left / Side.hold, anchor: .leading)
+                    .padding(.horizontal, 18).padding(.bottom, 9)
+            }
         }
     }
 
@@ -240,5 +252,124 @@ struct SideView: View {
         }
         .foregroundStyle(Color.fg2)
         .frame(height: 25)
+    }
+}
+
+/// Faint engineering-paper dots, the island's texture.
+struct SideDots: View {
+    var body: some View {
+        Canvas { ctx, size in
+            for x in stride(from: 7.0, to: size.width, by: 14) {
+                for y in stride(from: 7.0, to: size.height, by: 14) {
+                    ctx.fill(Path(ellipseIn: CGRect(x: x - 0.6, y: y - 0.6, width: 1.2, height: 1.2)), with: .color(.white.opacity(0.08)))
+                }
+            }
+        }
+        .frame(width: Side.canvas.width, height: Side.canvas.height)
+        .drawingGroup()
+    }
+}
+
+/// A tiny looping demo of the exercise, drawn in a 40×40 space, so the 20 seconds have something to follow.
+struct ExerciseArt: View {
+    let id: String, t: Double, progress: Double
+
+    var body: some View {
+        if id == "squeeze" {
+            let fist = Int(t / 0.7) % 2 == 0
+            Image(systemName: fist ? "hand.raised.fill" : "hand.raised.fingers.spread.fill")
+                .font(.system(size: 26, weight: .semibold)).foregroundStyle(Color.coral)
+                .scaleEffect(fist ? 0.84 : 1)
+                .contentTransition(.symbolEffect(.replace))
+                .animation(.spring(response: 0.3, dampingFraction: 0.5), value: fist)
+        } else {
+            Canvas { ctx, sz in
+                ctx.scaleBy(x: sz.width / 40, y: sz.height / 40)
+                draw(&ctx)
+            }
+        }
+    }
+
+    func draw(_ ctx: inout GraphicsContext) {
+        let ink = GraphicsContext.Shading.color(.coral)
+        let soft = GraphicsContext.Shading.color(.white.opacity(0.18))
+        let pen = StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round)
+        func dot(_ p: CGPoint, _ r: Double) -> Path { Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r)) }
+        func lerp(_ a: CGPoint, _ b: CGPoint, _ k: Double) -> CGPoint { CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k) }
+        func label(_ s: String) {
+            ctx.draw(Text(s.uppercased()).font(mono(5, .bold)).foregroundStyle(Color.coral), at: CGPoint(x: 20, y: 20))
+        }
+
+        switch id {
+        case "breathe":   // box breathing: a dot walks the square, 4s per side
+            let corners = [CGPoint(x: 8, y: 8), CGPoint(x: 32, y: 8), CGPoint(x: 32, y: 32), CGPoint(x: 8, y: 32)]
+            var box = Path()
+            box.addLines(corners + [corners[0]])
+            ctx.stroke(box, with: soft, style: pen)
+            let phase = t.truncatingRemainder(dividingBy: 16) / 4, side = Int(phase)
+            let p = lerp(corners[side], corners[(side + 1) % 4], phase - Double(side))
+            ctx.fill(dot(p, 5), with: .color(.coral.opacity(0.25)))
+            ctx.fill(dot(p, 2.8), with: ink)
+            label(["in", "hold", "out", "hold"][side])
+
+        case "blink":     // two eyes, closing slowly every few seconds
+            let closed = t.truncatingRemainder(dividingBy: 2.6) < 0.4
+            for x in [13.0, 27.0] {
+                if closed {
+                    var lid = Path()
+                    lid.move(to: CGPoint(x: x - 5, y: 20))
+                    lid.addQuadCurve(to: CGPoint(x: x + 5, y: 20), control: CGPoint(x: x, y: 24))
+                    ctx.stroke(lid, with: ink, style: pen)
+                } else {
+                    ctx.stroke(dot(CGPoint(x: x, y: 20), 5), with: ink, style: pen)
+                    ctx.fill(dot(CGPoint(x: x + 0.6, y: 20.5), 2.2), with: ink)
+                }
+            }
+
+        case "stand":     // slouch → stand tall, arms up, and back
+            let a = (1 - cos(t * 2)) / 2
+            let head = CGPoint(x: 20 + 5 * (1 - a), y: 8 + 4 * (1 - a)), neck = CGPoint(x: 20 + 3 * (1 - a), y: 13 + 3 * (1 - a))
+            let hip = CGPoint(x: 20, y: 27)
+            var body = Path()
+            body.move(to: neck)
+            body.addQuadCurve(to: hip, control: CGPoint(x: 20 + 7 * (1 - a), y: 20))
+            body.move(to: hip); body.addLine(to: CGPoint(x: 15, y: 37))
+            body.move(to: hip); body.addLine(to: CGPoint(x: 25, y: 37))
+            body.move(to: neck); body.addLine(to: lerp(CGPoint(x: 14, y: 25), CGPoint(x: 12, y: 3), a))
+            body.move(to: neck); body.addLine(to: lerp(CGPoint(x: 26, y: 25), CGPoint(x: 28, y: 3), a))
+            ctx.stroke(body, with: ink, style: pen)
+            ctx.fill(dot(head, 3.6), with: ink)
+
+        case "neck":      // sit tall, head tilting side to side
+            let neck = CGPoint(x: 20, y: 17), angle = 0.4 * sin(t * 1.8)
+            let head = CGPoint(x: neck.x + 7 * sin(angle), y: neck.y - 7 * cos(angle))
+            var body = Path()
+            body.move(to: neck); body.addLine(to: CGPoint(x: 20, y: 33))
+            body.move(to: CGPoint(x: 11, y: 21)); body.addLine(to: CGPoint(x: 29, y: 21))   // level shoulders
+            body.move(to: neck); body.addLine(to: head)
+            ctx.stroke(body, with: ink, style: pen)
+            ctx.fill(dot(head, 4), with: ink)
+
+        case "water":     // a glass filling up over the 20 seconds
+            var glass = Path()
+            glass.addLines([CGPoint(x: 11, y: 7), CGPoint(x: 14, y: 35), CGPoint(x: 26, y: 35), CGPoint(x: 29, y: 7)])
+            let level = 34 - 25 * min(1, progress)
+            ctx.drawLayer { l in
+                var inside = Path()
+                inside.addLines([CGPoint(x: 11, y: 7), CGPoint(x: 14, y: 35), CGPoint(x: 26, y: 35), CGPoint(x: 29, y: 7)])
+                inside.closeSubpath()
+                l.clip(to: inside)
+                var water = Path()
+                water.move(to: CGPoint(x: 8, y: 40))
+                for x in stride(from: 8.0, through: 32, by: 1) { water.addLine(to: CGPoint(x: x, y: level + 1.2 * sin(x * 0.6 + t * 4))) }
+                water.addLine(to: CGPoint(x: 32, y: 40))
+                water.closeSubpath()
+                l.fill(water, with: .color(Color.ice.opacity(0.85)))
+            }
+            ctx.stroke(glass, with: ink, style: pen)
+
+        default:
+            break
+        }
     }
 }
