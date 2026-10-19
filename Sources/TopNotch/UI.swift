@@ -291,17 +291,23 @@ struct Toast: View {
     var body: some View {
         HStack(spacing: 9) {
             Spacer(minLength: 0)
-            ZStack {
-                Circle().stroke(f.color, lineWidth: 1.5)
-                    .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.8 : 1).opacity(on ? 0 : 0.8) }
-                        animation: { on in on ? .easeOut(duration: 1.2) : .linear(duration: 0.01) }
-                Circle().fill(LinearGradient(colors: [f.color, f.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
-                Image(systemName: f.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+            if f.pet {
+                Cat(size: 34, wave: true)
+                Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+                Text(f.body).font(sans(12)).foregroundStyle(Color.fg2).lineLimit(1)
+            } else {
+                ZStack {
+                    Circle().stroke(f.color, lineWidth: 1.5)
+                        .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.8 : 1).opacity(on ? 0 : 0.8) }
+                            animation: { on in on ? .easeOut(duration: 1.2) : .linear(duration: 0.01) }
+                    Circle().fill(LinearGradient(colors: [f.color, f.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                    Image(systemName: f.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                }
+                .frame(width: 24, height: 24)
+                .shadow(color: f.color.opacity(0.75), radius: 8)
+                Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+                Caps(text: f.body, color: f.color)
             }
-            .frame(width: 24, height: 24)
-            .shadow(color: f.color.opacity(0.75), radius: 8)
-            Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
-            Caps(text: f.body, color: f.color)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
