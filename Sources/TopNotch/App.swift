@@ -12,7 +12,7 @@ import SwiftUI
     }
 }
 
-enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs }
+enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs, health }
 
 /// A few seconds of news: the island drops into a card. Hovering it opens `tab`.
 struct Flash: Equatable {
@@ -34,13 +34,17 @@ final class NotchPanel: NSPanel {
     static let canvas = CGSize(width: 860, height: 340)  // transparent window; the shape animates inside it
     static let openSize = CGSize(width: 760, height: 280)
     static let toast = CGSize(width: 440, height: 40)  // the strip under the notch
+    static let coachSize = CGSize(width: 470, height: 96)  // health break card, below the notch row
 
     let state = NotchState()
     let music = Music()
     let clip = Clip()
     let agents = Agents()
     let notifs = Notifs()
+    let coach = Coach()
     var panel: NotchPanel!
+    var coachPanel: NotchPanel!
+    var flyWindow: NSWindow?
     var closeWork: DispatchWorkItem?
     var inToast = false  // pointer was already over the toast; only a fresh touch dismisses it
 
@@ -54,7 +58,23 @@ final class NotchPanel: NSPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         panel.becomesKeyOnlyIfNeeded = true  // only text fields grab the keyboard (and pin it open)
-        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs))
+        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, coach: coach))
+
+        // the health card is its own small window: clickable without making the big canvas eat clicks
+        coachPanel = NotchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        coachPanel.isOpaque = false
+        coachPanel.backgroundColor = .clear
+        coachPanel.hasShadow = false
+        coachPanel.level = NSWindow.Level(rawValue: panel.level.rawValue + 1)
+        coachPanel.collectionBehavior = panel.collectionBehavior
+        coachPanel.becomesKeyOnlyIfNeeded = true
+        coachPanel.contentView = NSHostingView(rootView: CoachView(coach: coach, s: state))
+        coach.canInterrupt = { [weak self] in self?.state.open == false && self?.flyWindow == nil }
+        coach.onDue = { [weak self] _ in self?.fly() }
+        coach.onClear = { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { self?.coachPanel.orderOut(nil) }
+        }
+
         place()
         panel.orderFrontRegardless()
 
@@ -119,6 +139,49 @@ final class NotchPanel: NSPanel {
         }
         let c = Self.canvas
         panel.setFrame(NSRect(x: f.midX - c.width / 2, y: f.maxY - c.height, width: c.width, height: c.height), display: true)
+        coachPanel.setFrame(coachRect, display: true)
+    }
+
+    var coachRect: NSRect {
+        let f = panel.frame, c = Self.coachSize, h = state.notch.height + c.height
+        return NSRect(x: f.midX - c.width / 2, y: f.maxY - h, width: c.width, height: h)
+    }
+
+    /// The monkey swoops in across the screen (click-through), then lands in the break card on the notch.
+    func fly() {
+        if state.open { setOpen(false) }
+        guard let scr = panel.screen ?? NSScreen.main else { return }
+        let f = scr.frame, seat = coachRect
+        // where the monkey sits in CoachView: left padding + half its 70pt slot, centered in the content row
+        let to = CGPoint(x: seat.minX + 20 + 35 - f.minX, y: f.maxY - (seat.maxY - state.notch.height - 42))
+        let left = Bool.random()
+        let from = CGPoint(x: left ? -90 : f.width + 90, y: f.height * 0.62)
+        let dur = 2.8
+
+        let w = NSWindow(contentRect: f, styleMask: .borderless, backing: .buffered, defer: false)
+        w.isReleasedWhenClosed = false
+        w.isOpaque = false
+        w.backgroundColor = .clear
+        w.hasShadow = false
+        w.ignoresMouseEvents = true
+        w.level = NSWindow.Level(rawValue: coachPanel.level.rawValue + 1)
+        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        w.contentView = NSHostingView(rootView: FlyView(from: from, to: to, start: Date(), dur: dur))
+        w.setFrame(f, display: true)
+        w.orderFrontRegardless()
+        flyWindow = w
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + dur) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.coachPanel.setFrame(self.coachRect, display: true)
+                self.coachPanel.orderFrontRegardless()
+                NSSound(named: "Pop")?.play()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                    MainActor.assumeIsolated { self.flyWindow?.orderOut(nil); self.flyWindow = nil }
+                }
+            }
+        }
     }
 
     var toastRect: NSRect {
@@ -128,6 +191,7 @@ final class NotchPanel: NSPanel {
 
     func track() {
         let p = NSEvent.mouseLocation, f = panel.frame
+        if coachPanel.isVisible || flyWindow != nil { return }  // the monkey owns the notch right now
         if state.flash != nil, !state.open {  // touch-and-go: pointer entering the toast clears it
             let inside = toastRect.contains(p)
             if inside && !inToast { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { state.flash = nil } }
@@ -193,6 +257,20 @@ func selftest() {
     precondition(Notifs.parse(id: 1, bundle: "x", data: Data("junk".utf8)) == nil)
 
     for name in symbols { precondition(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)") }
+
+    // coach: most overdue enabled routine wins; nothing due early; streak skips an unfinished today
+    let now = Date(), rs = Coach.defaults
+    var last = Dictionary(uniqueKeysWithValues: rs.map { ($0.id, now) })
+    precondition(Coach.next(rs, last: last, now: now) == nil)
+    last["water"] = now.addingTimeInterval(-61 * 60); last["blink"] = now.addingTimeInterval(-50 * 60)
+    precondition(Coach.next(rs, last: last, now: now)?.id == "blink")  // 30m overdue beats 1m overdue
+    var off = rs; off[0].on = false
+    precondition(Coach.next(off, last: last, now: now)?.id == "water")
+    let day = 86400.0
+    let logs = (1...3).flatMap { d in (0..<3).map { _ in HealthLog(id: "water", at: now.addingTimeInterval(-Double(d) * day), done: true) } }
+        + [HealthLog(id: "water", at: now, done: true)]
+    precondition(Coach.streak(logs, now: now) == 3)
+    precondition(Coach.streak(logs + [HealthLog(id: "a", at: now, done: true), HealthLog(id: "b", at: now, done: true)], now: now) == 4)
 
     let h = Calendar.current.dateInterval(of: .hour, for: Date())!.start
     let b = Agents.blocks([(h.addingTimeInterval(-10 * 3600), 50), (h.addingTimeInterval(-9 * 3600), 50),

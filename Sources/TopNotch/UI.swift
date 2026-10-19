@@ -31,11 +31,12 @@ extension Tab {
         case .clip: "doc.on.clipboard.fill"
         case .notes: "square.and.pencil"
         case .msgs: "bubble.left.and.bubble.right.fill"
+        case .health: "heart.fill"
         }
     }
     var label: String { self == .agents ? "agents" : rawValue }
     var accent: Color {
-        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet }
+        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet; case .health: .coral }
     }
 }
 
@@ -55,6 +56,8 @@ let symbols = Tab.allCases.map(\.icon) + [
     "textformat", "checkmark", "doc.on.doc", "trash", "lock.shield.fill", "gearshape", "arrow.triangle.2.circlepath",
     "tray", "sparkle", "hand.wave.fill", "plus.circle.fill", "checkmark.circle.fill", "circle", "flag.fill", "flag",
     "xmark", "note.text", "textformat.size.smaller", "textformat.size.larger",
+    "heart.fill", "flame.fill", "eye", "figure.mind.and.body", "hand.raised.fingers.spread", "figure.stand", "drop.fill",
+    "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.
@@ -147,7 +150,7 @@ struct DotGrid: View {
 }
 
 struct NotchView: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, coach: Coach
 
     var flare: CGFloat { s.open ? 14 : 7 }
     var lyricIsland: Bool { !s.open && music.island && music.playing && !music.lyrics.isEmpty }
@@ -187,7 +190,7 @@ struct NotchView: View {
 
             Group {
                 if s.open {
-                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs)
+                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs, coach: coach)
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)).animation(spring.delay(0.06)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
@@ -334,7 +337,7 @@ struct Bars: View {
 // MARK: - Expanded
 
 struct Expanded: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, coach: Coach
     @State private var boot = SMAppService.mainApp.status == .enabled
     @Namespace private var ns
 
@@ -380,6 +383,7 @@ struct Expanded: View {
                 case .clip: ClipPane(clip: clip)
                 case .notes: NotesPane()
                 case .msgs: MsgsPane(n: notifs)
+                case .health: HealthPane(coach: coach)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
