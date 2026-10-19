@@ -10,7 +10,7 @@ struct Routine: Codable, Identifiable, Equatable {
     var on = true
 }
 
-/// Gentle health reminders: says it, then gets out of the way. No tracking, no buttons.
+/// Gentle health reminders: says it, then gets out of the way. No tracking.
 @Observable final class Coach {
     var routines: [Routine] {
         didSet { UserDefaults.standard.set(try? JSONEncoder().encode(routines), forKey: "reminders") }
@@ -79,215 +79,166 @@ struct Routine: Codable, Identifiable, Equatable {
     }
 }
 
-// MARK: - The kitten
-
-/// Hand-drawn ginger kitten: big sparkly eyes, pink nose, whiskers, swishing tail.
-struct Cat: View {
-    var size: CGFloat = 64
-    var wave = false   // paw up, saying hi
-
-    static let fur = Color(red: 0.97, green: 0.64, blue: 0.32)
-    static let stripe = Color(red: 0.84, green: 0.43, blue: 0.16)
-    static let cream = Color(red: 1.0, green: 0.94, blue: 0.84)
-    static let pink = Color(red: 1.0, green: 0.60, blue: 0.67)
-    static let ink = Color(red: 0.24, green: 0.14, blue: 0.10)
-
-    var body: some View {
-        TimelineView(.animation) { tl in
-            Canvas { ctx, sz in
-                ctx.scaleBy(x: sz.width / 100, y: sz.height / 100)
-                Self.draw(&ctx, t: tl.date.timeIntervalSinceReferenceDate, wave: wave)
-            }
-        }
-        .frame(width: size, height: size)
-    }
-
-    static func draw(_ ctx: inout GraphicsContext, t: Double, wave: Bool) {
-        func dot(_ x: Double, _ y: Double, _ r: Double) -> Path { Path(ellipseIn: CGRect(x: x - r, y: y - r, width: 2 * r, height: 2 * r)) }
-        func line(_ a: CGPoint, _ b: CGPoint, _ c: Color, _ w: Double) {
-            var p = Path()
-            p.move(to: a)
-            p.addLine(to: b)
-            ctx.stroke(p, with: .color(c), style: StrokeStyle(lineWidth: w, lineCap: .round))
-        }
-        func tri(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Path {
-            var p = Path()
-            p.move(to: a); p.addLine(to: b); p.addLine(to: c); p.closeSubpath()
-            return p
-        }
-        let swish = sin(t * 2.4)
-
-        // tail, swishing
-        var tail = Path()
-        tail.move(to: CGPoint(x: 64, y: 82))
-        tail.addCurve(to: CGPoint(x: 84 + 5 * swish, y: 48), control1: CGPoint(x: 90, y: 86), control2: CGPoint(x: 92 + 4 * swish, y: 64))
-        ctx.stroke(tail, with: .color(fur), style: StrokeStyle(lineWidth: 7, lineCap: .round))
-        ctx.fill(dot(84 + 5 * swish, 48, 3.6), with: .color(stripe))
-
-        // body, belly, paws
-        ctx.fill(Path(ellipseIn: CGRect(x: 30, y: 52, width: 40, height: 38)), with: .color(fur))
-        ctx.fill(Path(ellipseIn: CGRect(x: 40, y: 60, width: 20, height: 26)), with: .color(cream))
-        ctx.fill(Path(ellipseIn: CGRect(x: 35, y: 83, width: 13, height: 8)), with: .color(cream))
-        if !wave { ctx.fill(Path(ellipseIn: CGRect(x: 52, y: 83, width: 13, height: 8)), with: .color(cream)) }
-
-        // ears
-        ctx.fill(tri(CGPoint(x: 25, y: 30), CGPoint(x: 29, y: 4), CGPoint(x: 46, y: 18)), with: .color(fur))
-        ctx.fill(tri(CGPoint(x: 75, y: 30), CGPoint(x: 71, y: 4), CGPoint(x: 54, y: 18)), with: .color(fur))
-        ctx.fill(tri(CGPoint(x: 30, y: 25), CGPoint(x: 31, y: 11), CGPoint(x: 41, y: 19)), with: .color(pink))
-        ctx.fill(tri(CGPoint(x: 70, y: 25), CGPoint(x: 69, y: 11), CGPoint(x: 59, y: 19)), with: .color(pink))
-
-        // head, forehead stripes, muzzle
-        ctx.fill(Path(ellipseIn: CGRect(x: 21, y: 13, width: 58, height: 46)), with: .color(fur))
-        line(CGPoint(x: 50, y: 15), CGPoint(x: 50, y: 22), stripe, 2.4)
-        line(CGPoint(x: 44, y: 16), CGPoint(x: 45, y: 21), stripe, 2.2)
-        line(CGPoint(x: 56, y: 16), CGPoint(x: 55, y: 21), stripe, 2.2)
-        ctx.fill(Path(ellipseIn: CGRect(x: 38, y: 38, width: 24, height: 16)), with: .color(cream))
-
-        // big eyes with sparkle, blinking now and then
-        let closed = t.truncatingRemainder(dividingBy: 3.9) < 0.15
-        for x in [39.0, 61.0] {
-            if closed {
-                var lid = Path()
-                lid.move(to: CGPoint(x: x - 4.5, y: 34))
-                lid.addQuadCurve(to: CGPoint(x: x + 4.5, y: 34), control: CGPoint(x: x, y: 37.5))
-                ctx.stroke(lid, with: .color(ink), style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
-            } else {
-                ctx.fill(dot(x, 34, 5.2), with: .color(ink))
-                ctx.fill(dot(x + 1.7, 32, 1.9), with: .color(.white))
-                ctx.fill(dot(x - 1.6, 36.3, 0.9), with: .color(.white.opacity(0.8)))
-            }
-        }
-
-        // blush, nose, mouth, whiskers
-        ctx.fill(dot(31, 44, 3.6), with: .color(pink.opacity(0.55)))
-        ctx.fill(dot(69, 44, 3.6), with: .color(pink.opacity(0.55)))
-        ctx.fill(tri(CGPoint(x: 47.5, y: 41.5), CGPoint(x: 52.5, y: 41.5), CGPoint(x: 50, y: 44.5)), with: .color(pink))
-        var mouth = Path()
-        mouth.move(to: CGPoint(x: 45.5, y: 46.5))
-        mouth.addQuadCurve(to: CGPoint(x: 50, y: 46), control: CGPoint(x: 47.5, y: 49.5))
-        mouth.addQuadCurve(to: CGPoint(x: 54.5, y: 46.5), control: CGPoint(x: 52.5, y: 49.5))
-        ctx.stroke(mouth, with: .color(ink), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-        for (dy, k) in [(-2.0, -1.0), (1.0, 0.0), (4.0, 1.0)] {
-            line(CGPoint(x: 36, y: 45 + dy), CGPoint(x: 18, y: 43 + dy + 3 * k), ink.opacity(0.45), 0.9)
-            line(CGPoint(x: 64, y: 45 + dy), CGPoint(x: 82, y: 43 + dy + 3 * k), ink.opacity(0.45), 0.9)
-        }
-
-        // waving paw
-        if wave {
-            let paw = CGPoint(x: 82, y: 54 + 3 * sin(t * 9))
-            line(CGPoint(x: 62, y: 68), paw, fur, 8)
-            ctx.fill(dot(paw.x, paw.y, 4.6), with: .color(cream))
-        }
-    }
-}
-
-// MARK: - Flight (full-screen, click-through overlay)
-
-struct FlyView: View {
-    let from: CGPoint, to: CGPoint, start: Date, dur: Double
-
-    var body: some View {
-        TimelineView(.animation) { tl in
-            let p = min(1, max(0, tl.date.timeIntervalSince(start) / dur))
-            let e = p < 0.5 ? 2 * p * p : 1 - pow(-2 * p + 2, 2) / 2   // ease in-out
-            let pt = point(e), ahead = point(min(1, e + 0.01))
-            let tilt = max(-24, min(24, (ahead.y - pt.y) * (ahead.x >= pt.x ? 1.2 : -1.2)))
-            ZStack {
-                ForEach(1..<9) { k in
-                    let q = point(max(0, e - Double(k) * 0.022))
-                    Image(systemName: k.isMultiple(of: 2) ? "sparkle" : "heart.fill")
-                        .font(.system(size: CGFloat(14 - k)))
-                        .foregroundStyle(k.isMultiple(of: 2) ? Color.amber : Cat.pink)
-                        .opacity((1 - e) * (0.9 - Double(k) * 0.09))
-                        .position(q)
-                }
-                Cat(size: 96 - 62 * e, wave: true)
-                    .rotationEffect(.degrees(tilt))
-                    .position(pt)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// Swoop low through the middle of the screen, loop up, settle onto the notch.
-    func point(_ s: Double) -> CGPoint {
-        let c1 = CGPoint(x: (from.x + to.x) / 2, y: from.y + 420)
-        let c2 = CGPoint(x: to.x + (from.x < to.x ? 420 : -420), y: to.y + 320)
-        let u = 1 - s
-        let x = u * u * u * from.x + 3 * u * u * s * c1.x + 3 * u * s * s * c2.x + s * s * s * to.x
-        let y = u * u * u * from.y + 3 * u * u * s * c1.y + 3 * u * s * s * c2.y + s * s * s * to.y
-        return CGPoint(x: x, y: y + sin(s * .pi * 4) * 26 * u)
-    }
-}
-
 extension Color {
     static let coral = Color(red: 1.0, green: 0.52, blue: 0.40)
 }
 
-// MARK: - Reminders tab
+// MARK: - The edge tab: a liquid blob living on the right edge, above the Dock
 
-struct HealthPane: View {
-    let coach: Coach
+@Observable final class Side {
+    enum Mode: Equatable { case idle, menu, remind(Routine) }
+    var mode = Mode.idle
+    var magnet = 0.0    // 0…1, how close the pointer is
+    var pullY = 0.0     // pointer height in the canvas, where the liquid bulges
+    var ends = Date()   // reminder countdown end
+
+    static let canvas = CGSize(width: 340, height: 340)
+    static let base: CGFloat = 36       // gap under the blob, inside the window
+    static let hold = 20.0              // seconds a reminder waits for you
+
+    /// (protrusion from the edge, height, corner radius, edge flare) for each mode
+    var geo: (w: CGFloat, h: CGFloat, r: CGFloat, f: CGFloat) {
+        switch mode {
+        case .idle: (13 + 10 * magnet, 46 + 18 * magnet, 7, 7)
+        case .menu: (304, 236, 22, 12)
+        case .remind: (300, 92, 22, 12)
+        }
+    }
+}
+
+/// A tab of liquid stuck to the right screen edge: concave flares where it meets the edge, rounded outer
+/// corners, and a leading side that ripples at rest and bulges toward a nearby pointer.
+struct EdgeBlob: Shape {
+    var w: CGFloat, h: CGFloat, r: CGFloat, f: CGFloat, bulge: CGFloat
+    var bulgeY: CGFloat, wobble: CGFloat, t: Double
+
+    var animatableData: AnimatablePair<AnimatablePair<CGFloat, CGFloat>, AnimatablePair<CGFloat, AnimatablePair<CGFloat, CGFloat>>> {
+        get { .init(.init(w, h), .init(r, .init(f, bulge))) }
+        set { (w, h, r, f, bulge) = (newValue.first.first, newValue.first.second, newValue.second.first,
+                                     newValue.second.second.first, newValue.second.second.second) }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let edge = rect.maxX + 1, bottom = rect.maxY - Side.base, top = bottom - h, left = edge - 1 - w
+        let r = min(r, w * 0.9, h / 2), f = min(f, max(0, w - r))   // keep the outline from folding back
+        var p = Path()
+        p.move(to: CGPoint(x: edge, y: top - f))
+        p.addQuadCurve(to: CGPoint(x: edge - f, y: top), control: CGPoint(x: edge, y: top))
+        p.addLine(to: CGPoint(x: left + r, y: top))
+        p.addQuadCurve(to: CGPoint(x: left, y: top + r), control: CGPoint(x: left, y: top))
+        let span = max(1, h - 2 * r)
+        for y in stride(from: top + r, through: bottom - r, by: 1.5) {
+            let k = sin(.pi * (y - top - r) / span)   // 0 at the corners, so they stay attached
+            let ripple = wobble * sin(y * 0.16 + t * 2.4) * k
+            let pull = bulge * exp(-pow(y - bulgeY, 2) / (2 * 20 * 20)) * k
+            p.addLine(to: CGPoint(x: left - ripple - pull, y: y))
+        }
+        p.addLine(to: CGPoint(x: left, y: bottom - r))
+        p.addQuadCurve(to: CGPoint(x: left + r, y: bottom), control: CGPoint(x: left, y: bottom))
+        p.addLine(to: CGPoint(x: edge - f, y: bottom))
+        p.addQuadCurve(to: CGPoint(x: edge, y: bottom + f), control: CGPoint(x: edge, y: bottom))
+        p.closeSubpath()
+        return p
+    }
+}
+
+struct SideView: View {
+    let side: Side, coach: Coach
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Cat(size: 26)
-                Text("Reminders").font(sans(13, .semibold))
-                TimelineView(.periodic(from: .now, by: 30)) { _ in
-                    if coach.paused {
-                        Caps(text: "paused")
-                    } else if let r = coach.upcoming {
-                        Caps(text: "next: \(r.name) in \(max(0, Int(coach.nextIn(r) / 60)))m")
-                    }
-                }
-                Spacer()
-                Button {
-                    coach.pausedUntil = coach.paused ? nil : Date().addingTimeInterval(3600)
-                } label: {
-                    Pill(icon: coach.paused ? "play.fill" : "pause.fill", text: coach.paused ? "resume" : "pause 1h", color: .fg2)
-                }
-                Button { coach.test() } label: { Pill(icon: "sparkles", text: "test", color: .coral) }
-                    .help("show the next reminder now")
+        let g = side.geo, idle = side.mode == .idle
+        let c = Side.canvas, bottom = c.height - Side.base
+        ZStack(alignment: .topLeading) {
+            TimelineView(.animation(paused: !idle)) { tl in
+                let blob = EdgeBlob(w: g.w, h: g.h, r: g.r, f: g.f, bulge: idle ? 14 * side.magnet : 0, bulgeY: side.pullY,
+                                    wobble: idle ? 1.4 : 0, t: tl.date.timeIntervalSinceReferenceDate)
+                blob.fill(LinearGradient(colors: [Color(white: 0.09), .black], startPoint: .leading, endPoint: .trailing))
+                    .overlay(blob.stroke(Color.white.opacity(idle ? 0.18 : 0.10), lineWidth: 0.8))
+                    .shadow(color: .black.opacity(0.45), radius: 10, x: -2)
+                    .shadow(color: .coral.opacity(idle ? 0.25 * side.magnet : 0.18), radius: 14)
             }
-            .buttonStyle(Press())
 
-            ScrollView {
-                VStack(spacing: 3) { ForEach(coach.routines) { row($0) } }
+            Group {
+                switch side.mode {
+                case .idle: EmptyView()
+                case .menu: menu
+                case let .remind(r): reminder(r)
+                }
             }
-            .scrollIndicators(.never)
+            .frame(width: g.w - 30, height: g.h, alignment: .topLeading)
+            .position(x: c.width - g.w / 2 - 6, y: bottom - g.h / 2)
+            .transition(.opacity.animation(.easeOut(duration: 0.15).delay(0.12)))
+        }
+        .frame(width: c.width, height: c.height)
+        .foregroundStyle(Color.fg)
+        .animation(.spring(response: 0.45, dampingFraction: 0.76), value: side.mode)
+        .animation(.spring(response: 0.3, dampingFraction: 0.55), value: side.magnet)
+    }
+
+    func reminder(_ r: Routine) -> some View {
+        TimelineView(.animation) { tl in
+            let left = max(0, side.ends.timeIntervalSince(tl.date))
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().stroke(Color.white.opacity(0.1), lineWidth: 3)
+                    Circle().trim(from: 0, to: left / Side.hold)
+                        .stroke(Color.coral, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                    Image(systemName: r.icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(Color.coral)
+                }
+                .frame(width: 48, height: 48)
+                .shadow(color: .coral.opacity(0.5), radius: 8)
+                VStack(alignment: .leading, spacing: 3) {
+                    Caps(text: "health break · \(Int(left.rounded(.up)))s", color: .coral)
+                    Text(r.name).font(sans(16, .bold)).foregroundStyle(.white)
+                    Text(r.tip).font(sans(12)).foregroundStyle(Color.fg2).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxHeight: .infinity)
+            .padding(.leading, 18)
         }
     }
 
-    func row(_ r: Routine) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: r.icon).font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(r.on ? Color.coral : Color.fg3)
-                .frame(width: 24, height: 24)
-                .background((r.on ? Color.coral : Color.white).opacity(0.12), in: Circle())
-            Text(r.name).font(sans(12, .semibold)).foregroundStyle(r.on ? Color.fg : Color.fg3)
-            Text(r.tip).font(sans(11)).foregroundStyle(Color.fg3).lineLimit(1)
-            Spacer(minLength: 6)
-            HStack(spacing: 4) {
-                Button { coach.setEvery(r, r.every - 5) } label: { Image(systemName: "minus").font(.system(size: 8, weight: .bold)) }
-                Text("every \(r.every)m").font(mono(10, .semibold)).frame(width: 66)
-                Button { coach.setEvery(r, r.every + 5) } label: { Image(systemName: "plus").font(.system(size: 8, weight: .bold)) }
+    var menu: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "heart.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.coral)
+                Text("Reminders").font(sans(13, .semibold))
+                Spacer()
+                Button {
+                    coach.pausedUntil = coach.paused ? nil : Date().addingTimeInterval(3600)
+                } label: { Pill(icon: coach.paused ? "play.fill" : "pause.fill", text: coach.paused ? "resume" : "1h", color: .fg2) }
+                    .help(coach.paused ? "resume reminders" : "pause reminders for an hour")
+                Button { coach.test() } label: { Pill(icon: "sparkles", text: "test", color: .coral) }
+                    .help("show the next reminder now")
             }
-            .foregroundStyle(Color.fg2)
-            .padding(.horizontal, 6).frame(height: 20)
-            .background(Color.white.opacity(0.05), in: Capsule())
             TimelineView(.periodic(from: .now, by: 30)) { _ in
-                Caps(text: !r.on ? "off" : coach.paused ? "paused" : "in \(max(0, Int(coach.nextIn(r) / 60)))m")
-                    .frame(width: 52, alignment: .trailing)
+                if coach.paused { Caps(text: "paused for now") }
+                else if let r = coach.upcoming { Caps(text: "next: \(r.name) in \(max(0, Int(coach.nextIn(r) / 60)))m") }
             }
-            Button { coach.toggle(r) } label: {
-                Image(systemName: r.on ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 14)).foregroundStyle(r.on ? Color.coral : Color.fg3)
-            }
-            .help(r.on ? "turn off" : "turn on")
+            VStack(spacing: 2) { ForEach(coach.routines) { row($0) } }
         }
         .buttonStyle(Press())
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .card(.coral)
+        .padding(.leading, 16).padding(.top, 14)
+    }
+
+    func row(_ r: Routine) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: r.icon).font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(r.on ? Color.coral : Color.fg3).frame(width: 18)
+            Text(r.name).font(sans(12, .medium)).foregroundStyle(r.on ? Color.fg : Color.fg3).lineLimit(1)
+            Spacer(minLength: 4)
+            Button { coach.setEvery(r, r.every - 5) } label: { Image(systemName: "minus").font(.system(size: 8, weight: .bold)) }
+            Text("\(r.every)m").font(mono(10, .semibold)).foregroundStyle(Color.fg2).frame(width: 34)
+            Button { coach.setEvery(r, r.every + 5) } label: { Image(systemName: "plus").font(.system(size: 8, weight: .bold)) }
+            Button { coach.toggle(r) } label: {
+                Image(systemName: r.on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13)).foregroundStyle(r.on ? Color.coral : Color.fg3)
+            }
+            .padding(.leading, 4)
+        }
+        .foregroundStyle(Color.fg2)
+        .frame(height: 25)
     }
 }

@@ -31,12 +31,11 @@ extension Tab {
         case .clip: "doc.on.clipboard.fill"
         case .notes: "square.and.pencil"
         case .msgs: "bubble.left.and.bubble.right.fill"
-        case .health: "heart.fill"
         }
     }
     var label: String { self == .agents ? "agents" : rawValue }
     var accent: Color {
-        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet; case .health: .coral }
+        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet }
     }
 }
 
@@ -150,7 +149,7 @@ struct DotGrid: View {
 }
 
 struct NotchView: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, coach: Coach
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
 
     var flare: CGFloat { s.open ? 14 : 7 }
     var lyricIsland: Bool { !s.open && music.island && music.playing && !music.lyrics.isEmpty }
@@ -190,7 +189,7 @@ struct NotchView: View {
 
             Group {
                 if s.open {
-                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs, coach: coach)
+                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs)
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)).animation(spring.delay(0.06)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
@@ -291,23 +290,17 @@ struct Toast: View {
     var body: some View {
         HStack(spacing: 9) {
             Spacer(minLength: 0)
-            if f.pet {
-                Cat(size: 34, wave: true)
-                Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
-                Text(f.body).font(sans(12)).foregroundStyle(Color.fg2).lineLimit(1)
-            } else {
-                ZStack {
-                    Circle().stroke(f.color, lineWidth: 1.5)
-                        .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.8 : 1).opacity(on ? 0 : 0.8) }
-                            animation: { on in on ? .easeOut(duration: 1.2) : .linear(duration: 0.01) }
-                    Circle().fill(LinearGradient(colors: [f.color, f.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
-                    Image(systemName: f.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-                }
-                .frame(width: 24, height: 24)
-                .shadow(color: f.color.opacity(0.75), radius: 8)
-                Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
-                Caps(text: f.body, color: f.color)
+            ZStack {
+                Circle().stroke(f.color, lineWidth: 1.5)
+                    .phaseAnimator([false, true]) { v, on in v.scaleEffect(on ? 1.8 : 1).opacity(on ? 0 : 0.8) }
+                        animation: { on in on ? .easeOut(duration: 1.2) : .linear(duration: 0.01) }
+                Circle().fill(LinearGradient(colors: [f.color, f.color.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                Image(systemName: f.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
             }
+            .frame(width: 24, height: 24)
+            .shadow(color: f.color.opacity(0.75), radius: 8)
+            Text(f.title).font(sans(13, .semibold)).foregroundStyle(.white).lineLimit(1)
+            Caps(text: f.body, color: f.color)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
@@ -343,7 +336,7 @@ struct Bars: View {
 // MARK: - Expanded
 
 struct Expanded: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, coach: Coach
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
     @State private var boot = SMAppService.mainApp.status == .enabled
     @Namespace private var ns
 
@@ -389,7 +382,6 @@ struct Expanded: View {
                 case .clip: ClipPane(clip: clip)
                 case .notes: NotesPane()
                 case .msgs: MsgsPane(n: notifs)
-                case .health: HealthPane(coach: coach)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

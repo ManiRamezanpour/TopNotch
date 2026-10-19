@@ -12,12 +12,11 @@ import SwiftUI
     }
 }
 
-enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs, health }
+enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs }
 
 /// A few seconds of news: the island drops into a card. Hovering it opens `tab`.
 struct Flash: Equatable {
     let id = UUID(), icon: String, color: Color, app: String, title: String, body: String, tab: Tab, secs: Double
-    var pet = false   // health reminder: the kitten instead of an icon, tip in plain text
 }
 
 @Observable final class NotchState {
@@ -43,7 +42,10 @@ final class NotchPanel: NSPanel {
     let notifs = Notifs()
     let coach = Coach()
     var panel: NotchPanel!
-    var flyWindow: NSWindow?
+    let side = Side()
+    var sideWindow: NotchPanel!
+    var sideClose: DispatchWorkItem?
+    var inRemind = false  // pointer was already on the reminder card when it appeared
     var closeWork: DispatchWorkItem?
     var inToast = false  // pointer was already over the toast; only a fresh touch dismisses it
 
@@ -57,16 +59,25 @@ final class NotchPanel: NSPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         panel.becomesKeyOnlyIfNeeded = true  // only text fields grab the keyboard (and pin it open)
-        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, coach: coach))
+        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs))
 
-        coach.canInterrupt = { [weak self] in
-            guard let self else { return false }
-            return !state.open && state.flash == nil && flyWindow == nil  // never stomp on a message or an open panel
-        }
-        coach.onDue = { [weak self] r in self?.fly(r) }
+        // health reminders live in a liquid tab on the right screen edge, above the Dock
+        sideWindow = NotchPanel(contentRect: .init(origin: .zero, size: Side.canvas),
+                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        sideWindow.isOpaque = false
+        sideWindow.backgroundColor = .clear
+        sideWindow.hasShadow = false
+        sideWindow.level = .statusBar
+        sideWindow.collectionBehavior = panel.collectionBehavior
+        sideWindow.ignoresMouseEvents = true
+        sideWindow.becomesKeyOnlyIfNeeded = true
+        sideWindow.contentView = NSHostingView(rootView: SideView(side: side, coach: coach))
+        coach.canInterrupt = { [weak self] in self?.side.mode == .idle }
+        coach.onDue = { [weak self] r in self?.remind(r) }
 
         place()
         panel.orderFrontRegardless()
+        sideWindow.orderFrontRegardless()
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -129,39 +140,64 @@ final class NotchPanel: NSPanel {
         }
         let c = Self.canvas
         panel.setFrame(NSRect(x: f.midX - c.width / 2, y: f.maxY - c.height, width: c.width, height: c.height), display: true)
+        let v = scr.visibleFrame, sc = Side.canvas  // visibleFrame stops above the Dock
+        sideWindow.setFrame(NSRect(x: f.maxX - sc.width, y: v.minY + 6, width: sc.width, height: sc.height), display: true)
     }
 
-    /// The kitten swoops across the screen (click-through), lands on the notch, and says the reminder.
-    func fly(_ r: Routine) {
-        guard let scr = panel.screen ?? NSScreen.main else { return }
-        let f = scr.frame, t = toastRect
-        // land where the kitten sits in the centered toast strip
-        let to = CGPoint(x: t.midX - 122 - f.minX, y: f.maxY - (t.midY + 4))
-        let from = CGPoint(x: Bool.random() ? -90 : f.width + 90, y: f.height * 0.62)
-        let dur = 2.8
+    // MARK: edge tab
 
-        let w = NSWindow(contentRect: f, styleMask: .borderless, backing: .buffered, defer: false)
-        w.isReleasedWhenClosed = false
-        w.isOpaque = false
-        w.backgroundColor = .clear
-        w.hasShadow = false
-        w.ignoresMouseEvents = true
-        w.level = NSWindow.Level(rawValue: panel.level.rawValue + 1)
-        w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-        w.contentView = NSHostingView(rootView: FlyView(from: from, to: to, start: Date(), dur: dur))
-        w.setFrame(f, display: true)
-        w.orderFrontRegardless()
-        flyWindow = w
+    /// The tab's current card, in screen coordinates (for hover / touch tests).
+    var sideRect: NSRect {
+        let f = sideWindow.frame, g = side.geo
+        return NSRect(x: f.maxX - g.w - 8, y: f.minY + Side.base - 6, width: g.w + 8, height: g.h + 12)
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + dur) { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                NSSound(named: "Pop")?.play()
-                self.ping(Flash(icon: r.icon, color: .coral, app: "Reminder", title: r.name, body: r.tip, tab: .health, secs: 9, pet: true))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    MainActor.assumeIsolated { self.flyWindow?.orderOut(nil); self.flyWindow = nil }
-                }
+    func remind(_ r: Routine) {
+        sideClose?.cancel()
+        sideWindow.ignoresMouseEvents = true
+        side.ends = Date().addingTimeInterval(Side.hold)
+        side.mode = .remind(r)
+        inRemind = sideRect.contains(NSEvent.mouseLocation)
+        NSSound(named: "Tink")?.play()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Side.hold) { [weak self] in
+            MainActor.assumeIsolated { if self?.side.mode == .remind(r) { self?.side.mode = .idle } }
+        }
+    }
+
+    /// Magnet when the pointer approaches, pours open into the menu on touch, touch-and-go for reminders.
+    func trackSide(_ p: NSPoint) {
+        let f = sideWindow.frame
+        switch side.mode {
+        case .idle:
+            let anchor = NSPoint(x: f.maxX, y: f.minY + Side.base + side.geo.h / 2)
+            let m = max(0, 1 - hypot(p.x - anchor.x, p.y - anchor.y) / 170)
+            if abs(m - side.magnet) > 0.02 || (m == 0) != (side.magnet == 0) {
+                side.magnet = m
+                side.pullY = min(f.height, max(0, f.maxY - p.y))
             }
+            if p.x > f.maxX - 30, abs(p.y - anchor.y) < 44 {
+                side.magnet = 0
+                side.mode = .menu
+                sideWindow.ignoresMouseEvents = false
+            }
+        case .menu:
+            if sideRect.insetBy(dx: -14, dy: -14).contains(p) {
+                sideClose?.cancel(); sideClose = nil
+            } else if sideClose == nil {
+                let w = DispatchWorkItem { [weak self] in
+                    MainActor.assumeIsolated {
+                        self?.side.mode = .idle
+                        self?.sideWindow.ignoresMouseEvents = true
+                        self?.sideClose = nil
+                    }
+                }
+                sideClose = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+            }
+        case .remind:
+            let inside = sideRect.contains(p)
+            if inside && !inRemind { side.mode = .idle }   // touch to dismiss early
+            inRemind = inside
         }
     }
 
@@ -172,7 +208,7 @@ final class NotchPanel: NSPanel {
 
     func track() {
         let p = NSEvent.mouseLocation, f = panel.frame
-        if flyWindow != nil { return }  // the kitten is landing
+        trackSide(p)
         if state.flash != nil, !state.open {  // touch-and-go: pointer entering the toast clears it
             let inside = toastRect.contains(p)
             if inside && !inToast { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { state.flash = nil } }
