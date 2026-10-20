@@ -724,12 +724,24 @@ struct LyricLine: View {
 
     var body: some View {
         let f = Font.system(size: size, weight: .black).width(.condensed)
-        Text(text).font(f).foregroundStyle(Color.white.opacity(0.22))
+        Text(text).font(f).foregroundStyle(Color.white.opacity(0.2))
             .overlay {
-                Text(text).font(f)
-                    .foregroundStyle(LinearGradient(colors: [.neon, .ice, .hot], startPoint: .leading, endPoint: .trailing))
-                    .mask(alignment: .leading) { GeometryReader { g in Rectangle().frame(width: g.size.width * p) } }
-                    .shadow(color: .neon.opacity(0.55), radius: size / 5)
+                // sung part: polished white-chrome, a highlight sweeping across, soft white glow
+                TimelineView(.animation) { tl in
+                    let x = -0.25 + 1.5 * (tl.date.timeIntervalSinceReferenceDate / 2.4).truncatingRemainder(dividingBy: 1)
+                    Text(text).font(f)
+                        .foregroundStyle(LinearGradient(colors: [.white, Color(white: 0.9), Color(white: 0.68), Color(white: 0.95)],
+                                                        startPoint: .top, endPoint: .bottom))
+                        .overlay {
+                            LinearGradient(stops: [.init(color: .clear, location: x - 0.1), .init(color: .white, location: x),
+                                                   .init(color: .clear, location: x + 0.1)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                                .mask(Text(text).font(f))
+                                .blendMode(.plusLighter)
+                        }
+                        .mask(alignment: .leading) { GeometryReader { g in Rectangle().frame(width: g.size.width * p) } }
+                        .shadow(color: .white.opacity(0.5), radius: size / 7)
+                }
             }
             .lineLimit(1)
             .minimumScaleFactor(0.4)
