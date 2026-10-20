@@ -12,7 +12,7 @@ import SwiftUI
     }
 }
 
-enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs }
+enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs, sys }
 
 /// A few seconds of news: the island drops into a card. Hovering it opens `tab`.
 struct Flash: Equatable {
@@ -41,6 +41,7 @@ final class NotchPanel: NSPanel {
     let agents = Agents()
     let notifs = Notifs()
     let coach = Coach()
+    let stats = Stats()
     var panel: NotchPanel!
     let side = Side()
     var sideWindow: NotchPanel!
@@ -59,7 +60,7 @@ final class NotchPanel: NSPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         panel.becomesKeyOnlyIfNeeded = true  // only text fields grab the keyboard (and pin it open)
-        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs))
+        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, stats: stats))
 
         // health reminders live in a liquid tab on the right screen edge, above the Dock
         sideWindow = NotchPanel(contentRect: .init(origin: .zero, size: Side.canvas),
@@ -107,6 +108,7 @@ final class NotchPanel: NSPanel {
             self?.ping(Flash(icon: "checkmark.seal.fill", color: .neon, app: "Claude Code", title: name,
                              body: "done · your turn", tab: .agents, secs: 5))
         }
+        stats.onEvent = { [weak self] f in self?.ping(f) }
         notifs.onNew = { [weak self] n in
             // who texted, never what: "Mani → arshyrzd" (Telegram multi-account) → "Mani"
             let who = n.title.components(separatedBy: " → ").first ?? n.title
@@ -295,6 +297,13 @@ func selftest() {
     precondition(Coach.next(rs, last: last, now: now)?.id == "blink")  // 30m overdue beats 1m overdue
     var off = rs; off[0].on = false
     precondition(Coach.next(off, last: last, now: now)?.id == "water")
+
+    precondition(Stats.parseProc("  412  23.5  81232 Google Chrome Helper") == Proc(id: 412, name: "Google Chrome Helper", cpu: 23.5, mem: 81232 * 1024))
+    precondition(Stats.parseProc("PID %CPU") == nil)
+    precondition(fmtBytes(512) == "512B" && fmtBytes(1536) == "1.5K" && fmtBytes(250 * 1024 * 1024) == "250M")
+    precondition(mins(45) == "45m" && mins(192) == "3h12m")
+    precondition(Stats.ticks() != nil && Stats.memUsed()! > 0)
+    print("battery:", Stats.battery().map { "\($0)" } ?? "none", "| top:", Stats.topProcs().map(\.name))
 
     let h = Calendar.current.dateInterval(of: .hour, for: Date())!.start
     let b = Agents.blocks([(h.addingTimeInterval(-10 * 3600), 50), (h.addingTimeInterval(-9 * 3600), 50),

@@ -7,6 +7,7 @@ A geeky Dynamic Island for the MacBook notch. Hover the notch and it springs ope
 - **Clipboard:** history of what you copy. Password-manager copies are skipped, and nothing is stored on disk.
 - **Notes:** a scratchpad that saves automatically.
 - **Messages:** WhatsApp and Telegram notifications show up instantly as a card on the notch.
+- **System:** live CPU, memory and network with two-minute sparklines, battery (time left, cycles, health, charger watts), free disk, thermal pressure, uptime and the top processes. The notch flashes when you plug in or unplug, when the battery drops to 20/10/5%, and when the Mac runs hot; a pegged CPU shows on the closed notch.
 
 Native SwiftUI. No dependencies, no Xcode project.
 
