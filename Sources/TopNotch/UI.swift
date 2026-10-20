@@ -61,7 +61,7 @@ let symbols = Tab.allCases.map(\.icon) + [
     "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
     "hand.raised.fill", "hand.raised.fingers.spread.fill",
     "memorychip", "network", "arrow.down", "arrow.up", "internaldrive", "thermometer.medium", "clock",
-    "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
+    "music.note.list", "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.
@@ -700,10 +700,16 @@ struct MusicPane: View {
             Button { m.send("next track") } label: { Image(systemName: "forward.fill") }
             Image(systemName: "speaker.wave.2.fill").font(.system(size: 10)).foregroundStyle(Color.fg3).padding(.leading, 4)
             Scrub(value: m.volume / 100, color: .fg2) { m.setVolume($0 * 100) }.frame(width: 80)
-            Button { m.island.toggle() } label: {
-                Pill(icon: "captions.bubble.fill", text: "island", color: m.island ? .neon : .fg3)
+            Button { withAnimation(spring) { m.lyricsOn.toggle() } } label: {
+                Pill(icon: "music.note.list", text: "lyrics", color: m.lyricsOn ? .neon : .fg3)
             }
-            .help("show the live lyric line under the notch while music plays")
+            .help(m.lyricsOn ? "lyrics on — click to turn them off" : "lyrics off — click to turn them on")
+            if m.lyricsOn {
+                Button { m.island.toggle() } label: {
+                    Pill(icon: "captions.bubble.fill", text: "island", color: m.island ? .neon : .fg3)
+                }
+                .help("show the live lyric line under the notch while music plays")
+            }
         }
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(Color.fg)

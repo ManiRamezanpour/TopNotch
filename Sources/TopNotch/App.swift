@@ -30,6 +30,11 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
+/// The panels never activate the app, so the very first click has to land on a button, not just focus the window.
+final class FirstClickHost<V: View>: NSHostingView<V> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     static let canvas = CGSize(width: 860, height: 340)  // transparent window; the shape animates inside it
     static let openSize = CGSize(width: 760, height: 280)
@@ -48,6 +53,9 @@ final class NotchPanel: NSPanel {
     var sideClose: DispatchWorkItem?
     var inRemind = false  // pointer was already on the reminder card when it appeared
     var closeWork: DispatchWorkItem?
+    var openWork: DispatchWorkItem?
+    /// How long the pointer has to rest on the notch before it opens, so sweeping across the menu bar doesn't pop it.
+    static let dwell = 0.12
     var inToast = false  // pointer was already over the toast; only a fresh touch dismisses it
 
     func applicationDidFinishLaunching(_ n: Notification) {
@@ -60,7 +68,7 @@ final class NotchPanel: NSPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
         panel.becomesKeyOnlyIfNeeded = true  // only text fields grab the keyboard (and pin it open)
-        panel.contentView = NSHostingView(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, stats: stats))
+        panel.contentView = FirstClickHost(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, stats: stats))
 
         // health reminders live in a liquid tab on the right screen edge, above the Dock
         sideWindow = NotchPanel(contentRect: .init(origin: .zero, size: Side.canvas),
@@ -72,7 +80,7 @@ final class NotchPanel: NSPanel {
         sideWindow.collectionBehavior = panel.collectionBehavior
         sideWindow.ignoresMouseEvents = true
         sideWindow.becomesKeyOnlyIfNeeded = true
-        sideWindow.contentView = NSHostingView(rootView: SideView(side: side, coach: coach))
+        sideWindow.contentView = FirstClickHost(rootView: SideView(side: side, coach: coach))
         coach.canInterrupt = { [weak self] in self?.side.mode == .idle }
         coach.onDue = { [weak self] r in self?.remind(r) }
 
@@ -183,6 +191,7 @@ final class NotchPanel: NSPanel {
                 sideWindow.ignoresMouseEvents = false
             }
         case .menu:
+            if NSEvent.pressedMouseButtons == 0 { sideWindow.ignoresMouseEvents = !sideRect.contains(p) }
             if sideRect.insetBy(dx: -14, dy: -14).contains(p) {
                 sideClose?.cancel(); sideClose = nil
             } else if sideClose == nil {
@@ -217,12 +226,27 @@ final class NotchPanel: NSPanel {
             inToast = inside
         }
         let size = state.open ? Self.openSize : CGSize(width: state.notch.width + 40, height: state.notch.height)
-        let slack: CGFloat = state.open ? 18 : 2
-        let hot = NSRect(x: f.midX - size.width / 2, y: f.maxY - size.height, width: size.width, height: size.height)
-            .insetBy(dx: -slack, dy: -slack)
+        let island = NSRect(x: f.midX - size.width / 2, y: f.maxY - size.height, width: size.width, height: size.height)
+        let hot = island.insetBy(dx: state.open ? -8 : -2, dy: state.open ? -8 : -2)
+        // the window is bigger than the island: only the island itself may swallow clicks, the rest passes through
+        if state.open, NSEvent.pressedMouseButtons == 0 { panel.ignoresMouseEvents = !island.contains(p) }
         if hot.contains(p) {
             closeWork?.cancel(); closeWork = nil
-            if !state.open { setOpen(true) }
+            if !state.open, openWork == nil {
+                let w = DispatchWorkItem { [weak self] in
+                    MainActor.assumeIsolated {
+                        self?.openWork = nil
+                        guard let self, !self.state.open else { return }
+                        let f = self.panel.frame, n = self.state.notch
+                        let zone = NSRect(x: f.midX - n.width / 2 - 22, y: f.maxY - n.height - 2, width: n.width + 44, height: n.height + 4)
+                        if zone.contains(NSEvent.mouseLocation) { self.setOpen(true) }
+                    }
+                }
+                openWork = w
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.dwell, execute: w)
+            }
+        } else if !state.open {
+            openWork?.cancel(); openWork = nil
         } else if state.open, closeWork == nil, !panel.isKeyWindow {
             let w = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.setOpen(false) } }
             closeWork = w
@@ -232,9 +256,10 @@ final class NotchPanel: NSPanel {
 
     func setOpen(_ open: Bool) {
         closeWork = nil
+        openWork?.cancel(); openWork = nil
         if open, let f = state.flash { state.tab = f.tab; state.flash = nil }  // hovering a toast takes you to it
         withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) { state.open = open }
-        panel.ignoresMouseEvents = !open
+        panel.ignoresMouseEvents = !(open && panel.frame.contains(NSEvent.mouseLocation))
         if !open, panel.isKeyWindow {  // hand keyboard back to whatever app you were in
             panel.orderOut(nil)
             panel.orderFrontRegardless()
