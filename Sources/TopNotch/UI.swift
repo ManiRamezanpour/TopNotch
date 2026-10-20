@@ -724,7 +724,7 @@ struct LyricLine: View {
 
     var body: some View {
         let f = Font.system(size: size, weight: .black).width(.condensed)
-        Text(text).font(f).foregroundStyle(Color.white.opacity(0.2))
+        Text(text).font(f).foregroundStyle(Color.white.opacity(0.32))
             .overlay {
                 // sung part: polished white-chrome, a highlight sweeping across, soft white glow
                 TimelineView(.animation) { tl in

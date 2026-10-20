@@ -50,7 +50,7 @@ import ApplicationServices
             var newArt: NSImage??
             if let (app, f) = best, artKey != app + f[1] + f[3] {
                 artKey = app + f[1] + f[3]
-                fetchLyrics(title: f[1], artist: f[2], dur: Self.num(f[5]), key: artKey)
+                fetchLyrics(title: f[1], artist: f[2], album: f[3], dur: Self.num(f[5]), key: artKey)
                 newArt = .some(app == "Spotify"
                     ? URL(string: f[6]).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
                     : (try? runDescriptor("tell application \"Music\" to get raw data of artwork 1 of current track"))
@@ -77,19 +77,43 @@ import ApplicationServices
     }
 
     @ObservationIgnored private var lyricsKey = ""
-    private func fetchLyrics(title: String, artist: String, dur: Double, key: String) {
+    /// Exact LRCLIB match first (title/artist/album/length ±2s), then a strict search. Wrong lyrics are worse than none.
+    private func fetchLyrics(title: String, artist: String, album: String, dur: Double, key: String) {
         DispatchQueue.main.async { self.lyrics = []; self.lyricsKey = key }
-        var c = URLComponents(string: "https://lrclib.net/api/search")!
-        c.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist)]
-        var req = URLRequest(url: c.url!)
-        req.setValue("TopNotch/1.0 (personal notch app)", forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: req) { data, _, _ in
-            let hits = (data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]] ?? [])
-                .filter { $0["syncedLyrics"] is String }
-            let best = hits.min { abs(($0["duration"] as? Double ?? 0) - dur) < abs(($1["duration"] as? Double ?? 0) - dur) }
-            let lines = Self.lrc(best?["syncedLyrics"] as? String ?? "")
+        func call(_ path: String, _ q: [String: String], _ done: @escaping (Any?) -> Void) {
+            var c = URLComponents(string: "https://lrclib.net/api/" + path)!
+            c.queryItems = q.map { URLQueryItem(name: $0.key, value: $0.value) }
+            var req = URLRequest(url: c.url!)
+            req.setValue("TopNotch/1.0 (personal notch app)", forHTTPHeaderField: "User-Agent")
+            URLSession.shared.dataTask(with: req) { data, _, _ in done(data.flatMap { try? JSONSerialization.jsonObject(with: $0) }) }.resume()
+        }
+        func use(_ synced: String?) {
+            let lines = Self.lrc(synced ?? "")
             DispatchQueue.main.async { if self.lyricsKey == key { self.lyrics = lines } }
-        }.resume()
+        }
+        call("get", ["track_name": title, "artist_name": artist, "album_name": album, "duration": "\(Int(dur.rounded()))"]) { got in
+            if let synced = (got as? [String: Any])?["syncedLyrics"] as? String { return use(synced) }
+            call("search", ["track_name": Self.clean(title), "artist_name": artist]) { hits in
+                use(Self.pick(hits as? [[String: Any]] ?? [], title: title, dur: dur))
+            }
+        }
+    }
+
+    /// "Song (feat. X) - Remastered [Explicit]" → "Song"
+    static func clean(_ t: String) -> String {
+        t.replacingOccurrences(of: #"\s*[\(\[].*?[\)\]]"#, with: "", options: .regularExpression)
+            .components(separatedBy: " - ").first!.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Synced lyrics for the same title (after `clean`) within 8s of the track's length; closest length wins.
+    static func pick(_ hits: [[String: Any]], title: String, dur: Double) -> String? {
+        let want = clean(title).lowercased()
+        return hits.compactMap { h -> (Double, String)? in
+            guard let s = h["syncedLyrics"] as? String, let d = h["duration"] as? Double, abs(d - dur) <= 8,
+                  clean(h["trackName"] as? String ?? "").lowercased() == want else { return nil }
+            return (abs(d - dur), s)
+        }
+        .min { $0.0 < $1.0 }?.1
     }
 
     /// "[01:23.45] text" → (83.45, "text")

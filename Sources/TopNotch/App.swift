@@ -264,6 +264,18 @@ func selftest() {
 
     let l = Music.lrc("[ti:x]\n[00:13.42] Yeah\n[00:14.81] \n[01:02.50] I've been tryna call")
     precondition(l.count == 3 && l[0].t == 13.42 && l[1].text.isEmpty && l[2].t == 62.5 && l[2].text == "I've been tryna call")
+    // lyric matching: never pick a version far off the track's length (the "Savage Mode" remix bug)
+    precondition(Music.clean("Savage Mode (feat. X) - Remastered [Explicit]") == "Savage Mode")
+    let hits: [[String: Any]] = [
+        ["trackName": "Purple Savage Mode II Intro (ChopNotSlop Remix)", "duration": 121.0, "syncedLyrics": "remix"],
+        ["trackName": "Savage Mode", "duration": 250.0, "syncedLyrics": "real"],
+        ["trackName": "Savage Mode - Live", "duration": 247.0, "syncedLyrics": "live"],
+    ]
+    precondition(Music.pick(hits, title: "Savage Mode", dur: 169) == nil)
+    precondition(Music.pick(hits, title: "Savage Mode", dur: 249.4) == "real")
+    precondition(Music.pick(hits, title: "Savage Mode", dur: 247.2) == "live")   // " - Live" cleans to the same title
+    precondition(Music.pick(hits, title: "Savage Mode", dur: 121.4) == nil)      // different song, even if length fits
+
     let m = Music(); m.lyrics = l
     precondition(m.line(at: 5) == nil && m.line(at: 13.5)!.text == "Yeah" && m.line(at: 70)!.i == 2)
 
