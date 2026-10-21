@@ -6,7 +6,7 @@ A geeky Dynamic Island for the MacBook notch. Hover the notch and it springs ope
 - **Music:** Apple Music and Spotify controls, album art and seeking, plus time-synced lyrics from [LRCLIB](https://lrclib.net). The line being sung right now can show big under the notch.
 - **Clipboard:** history of what you copy. Password-manager copies are skipped, and nothing is stored on disk.
 - **Notes:** a scratchpad that saves automatically.
-- **Messages:** WhatsApp and Telegram notifications show up instantly as a card on the notch.
+- **Messages:** WhatsApp, Telegram and Slack notifications show up instantly as a card on the notch, with each app's unread badge on the closed notch.
 
 Native SwiftUI. No dependencies, no Xcode project.
 
