@@ -10,6 +10,7 @@ extension Color {
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.30)
     static let ice = Color(red: 0.38, green: 0.84, blue: 1.0)
     static let violet = Color(red: 0.68, green: 0.58, blue: 1.0)
+    static let jade = Color(red: 0.25, green: 0.88, blue: 0.80)  // firouzeh
     static let volt = Color(red: 0.86, green: 1.0, blue: 0.36)
     static let tg = Color(red: 0.18, green: 0.68, blue: 0.95)
     static let wa = Color(red: 0.16, green: 0.85, blue: 0.42)
@@ -32,13 +33,14 @@ extension Tab {
         case .music: "waveform"
         case .clip: "doc.on.clipboard.fill"
         case .notes: "square.and.pencil"
+        case .cal: "calendar"
         case .msgs: "bubble.left.and.bubble.right.fill"
         case .sys: "cpu"
         }
     }
     var label: String { self == .agents ? "agents" : rawValue }
     var accent: Color {
-        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet; case .sys: .volt }
+        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .cal: .jade; case .msgs: .violet; case .sys: .volt }
     }
 }
 
@@ -63,6 +65,7 @@ let symbols = Tab.allCases.map(\.icon) + [
     "hand.raised.fill", "hand.raised.fingers.spread.fill",
     "memorychip", "network", "arrow.down", "arrow.up", "internaldrive", "thermometer.medium", "clock",
     "music.note.list", "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
+    "chevron.left", "chevron.right", "arrow.uturn.backward",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.
@@ -375,6 +378,10 @@ struct Expanded: View {
                         .help("Quit TopNotch")
                     TimelineView(.periodic(from: .now, by: 1)) { tl in
                         HStack(spacing: 0) {
+                            Text(Jalali.short(tl.date)).font(sans(11, .medium)).foregroundStyle(Color.jade)
+                                .padding(.trailing, 7)
+                                .onTapGesture { withAnimation(spring) { s.tab = .cal } }
+                                .help(Jalali.long(tl.date))
                             Text(tl.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute()).foregroundStyle(Color.fg)
                             Text(tl.date, format: .dateTime.second(.twoDigits)).foregroundStyle(Color.fg3)
                                 .padding(.leading, 3)
@@ -395,6 +402,7 @@ struct Expanded: View {
                 case .music: MusicPane(m: music)
                 case .clip: ClipPane(clip: clip)
                 case .notes: NotesPane()
+                case .cal: CalPane()
                 case .msgs: MsgsPane(n: notifs)
                 case .sys: SysPane(st: stats)
                 }
