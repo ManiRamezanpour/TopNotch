@@ -6,6 +6,8 @@ A geeky Dynamic Island for the MacBook notch. Hover the notch and it springs ope
 - **Music:** Apple Music and Spotify controls, album art and seeking, plus time-synced lyrics from [LRCLIB](https://lrclib.net). The line being sung right now can show big under the notch.
 - **Clipboard:** history of what you copy. Password-manager copies are skipped, and nothing is stored on disk.
 - **Notes:** a scratchpad that saves automatically.
+
+- **System:** live CPU, memory and network with two-minute sparklines, battery (time left, cycles, health, charger watts), free disk, thermal pressure, uptime and the top processes. The notch flashes when you plug in or unplug, when the battery drops to 20/10/5%, and when the Mac runs hot; a pegged CPU shows on the closed notch.
 - **Messages:** WhatsApp, Telegram and Slack notifications show up instantly as a card on the notch, with each app's unread badge on the closed notch.
 
 Native SwiftUI. No dependencies, no Xcode project.

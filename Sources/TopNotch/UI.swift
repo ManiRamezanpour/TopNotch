@@ -10,6 +10,7 @@ extension Color {
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.30)
     static let ice = Color(red: 0.38, green: 0.84, blue: 1.0)
     static let violet = Color(red: 0.68, green: 0.58, blue: 1.0)
+    static let volt = Color(red: 0.86, green: 1.0, blue: 0.36)
     static let tg = Color(red: 0.18, green: 0.68, blue: 0.95)
     static let wa = Color(red: 0.16, green: 0.85, blue: 0.42)
     static let slack = Color(red: 0.88, green: 0.12, blue: 0.35)
@@ -32,11 +33,12 @@ extension Tab {
         case .clip: "doc.on.clipboard.fill"
         case .notes: "square.and.pencil"
         case .msgs: "bubble.left.and.bubble.right.fill"
+        case .sys: "cpu"
         }
     }
     var label: String { self == .agents ? "agents" : rawValue }
     var accent: Color {
-        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet }
+        switch self { case .agents: .neon; case .music: .hot; case .clip: .ice; case .notes: .amber; case .msgs: .violet; case .sys: .volt }
     }
 }
 
@@ -59,6 +61,8 @@ let symbols = Tab.allCases.map(\.icon) + [
     "heart.fill", "flame.fill", "eye", "figure.mind.and.body", "hand.raised.fingers.spread", "figure.stand", "drop.fill",
     "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
     "hand.raised.fill", "hand.raised.fingers.spread.fill",
+    "memorychip", "network", "arrow.down", "arrow.up", "internaldrive", "thermometer.medium", "clock",
+    "music.note.list", "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
 ]
 
 /// Small uppercase mono label — the "HUD" voice.
@@ -151,7 +155,7 @@ struct DotGrid: View {
 }
 
 struct NotchView: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, stats: Stats
 
     var flare: CGFloat { s.open ? 14 : 7 }
     var lyricIsland: Bool { !s.open && music.island && music.playing && !music.lyrics.isEmpty }
@@ -191,11 +195,11 @@ struct NotchView: View {
 
             Group {
                 if s.open {
-                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs)
+                    Expanded(s: s, music: music, clip: clip, agents: agents, notifs: notifs, stats: stats)
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)).animation(spring.delay(0.06)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
-                    Collapsed(s: s, music: music, agents: agents, notifs: notifs, lyric: lyricIsland)
+                    Collapsed(s: s, music: music, agents: agents, notifs: notifs, stats: stats, lyric: lyricIsland)
                         .transition(.opacity.animation(.easeInOut(duration: 0.18)))
                 }
             }
@@ -211,7 +215,7 @@ struct NotchView: View {
 // MARK: - Collapsed
 
 struct Collapsed: View {
-    let s: NotchState, music: Music, agents: Agents, notifs: Notifs, lyric: Bool
+    let s: NotchState, music: Music, agents: Agents, notifs: Notifs, stats: Stats, lyric: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -261,7 +265,14 @@ struct Collapsed: View {
 
     @ViewBuilder var right: some View {
         do {
-            HStack(spacing: 8) {  // three badges have to fit the wing
+            HStack(spacing: 10) {
+                // only when the Mac is struggling: a pegged CPU or thermal pressure
+                if stats.thermal.rawValue >= ProcessInfo.ThermalState.serious.rawValue {
+                    Image(systemName: "flame.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(Color.hot)
+                        .symbolEffect(.pulse).shadow(color: Color.hot.opacity(0.6), radius: 4)
+                } else if stats.cpu > 0.85 {
+                    count("cpu", Int(stats.cpu * 100), .hot, pulse: true)
+                }
                 MsgBadge(icon: "paperplane.fill", color: .tg, count: notifs.badges["Telegram"])
                 MsgBadge(icon: "phone.bubble.fill", color: .wa, count: notifs.badges["WhatsApp"])
                 MsgBadge(icon: "number", color: .slack, count: notifs.badges["Slack"])
@@ -339,7 +350,7 @@ struct Bars: View {
 // MARK: - Expanded
 
 struct Expanded: View {
-    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs
+    let s: NotchState, music: Music, clip: Clip, agents: Agents, notifs: Notifs, stats: Stats
     @State private var boot = SMAppService.mainApp.status == .enabled
     @Namespace private var ns
 
@@ -385,6 +396,7 @@ struct Expanded: View {
                 case .clip: ClipPane(clip: clip)
                 case .notes: NotesPane()
                 case .msgs: MsgsPane(n: notifs)
+                case .sys: SysPane(st: stats)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -690,10 +702,16 @@ struct MusicPane: View {
             Button { m.send("next track") } label: { Image(systemName: "forward.fill") }
             Image(systemName: "speaker.wave.2.fill").font(.system(size: 10)).foregroundStyle(Color.fg3).padding(.leading, 4)
             Scrub(value: m.volume / 100, color: .fg2) { m.setVolume($0 * 100) }.frame(width: 80)
-            Button { m.island.toggle() } label: {
-                Pill(icon: "captions.bubble.fill", text: "island", color: m.island ? .neon : .fg3)
+            Button { withAnimation(spring) { m.lyricsOn.toggle() } } label: {
+                Pill(icon: "music.note.list", text: "lyrics", color: m.lyricsOn ? .neon : .fg3)
             }
-            .help("show the live lyric line under the notch while music plays")
+            .help(m.lyricsOn ? "lyrics on — click to turn them off" : "lyrics off — click to turn them on")
+            if m.lyricsOn {
+                Button { m.island.toggle() } label: {
+                    Pill(icon: "captions.bubble.fill", text: "island", color: m.island ? .neon : .fg3)
+                }
+                .help("show the live lyric line under the notch while music plays")
+            }
         }
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(Color.fg)

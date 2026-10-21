@@ -19,6 +19,14 @@ import ApplicationServices
     var island = UserDefaults.standard.object(forKey: "island") as? Bool ?? true {  // live lyric under the notch
         didSet { UserDefaults.standard.set(island, forKey: "island") }
     }
+    /// Master switch for lyrics: off means no LRCLIB lookups and no lyrics anywhere.
+    var lyricsOn = UserDefaults.standard.object(forKey: "lyricsOn") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(lyricsOn, forKey: "lyricsOn")
+            if !lyricsOn { lyrics = []; lyricsKey = "" }
+            q.async { self.artKey = "" }  // turning it back on: refetch for the current track on the next poll
+        }
+    }
     /// Seconds to show a line early — AppleScript's playhead lags a hair. Tune if lines feel late/early.
     static let lyricLead = 0.3
 
@@ -36,6 +44,7 @@ import ApplicationServices
     func now(_ d: Date) -> Double { playing ? min(dur, pos + d.timeIntervalSince(stamp)) : pos }
 
     func poll() {
+        let wantLyrics = lyricsOn
         q.async { [weak self] in
             guard let self else { return }
             var best: (String, [String])?
@@ -50,7 +59,7 @@ import ApplicationServices
             var newArt: NSImage??
             if let (app, f) = best, artKey != app + f[1] + f[3] {
                 artKey = app + f[1] + f[3]
-                fetchLyrics(title: f[1], artist: f[2], album: f[3], dur: Self.num(f[5]), key: artKey)
+                if wantLyrics { fetchLyrics(title: f[1], artist: f[2], album: f[3], dur: Self.num(f[5]), key: artKey) }
                 newArt = .some(app == "Spotify"
                     ? URL(string: f[6]).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
                     : (try? runDescriptor("tell application \"Music\" to get raw data of artwork 1 of current track"))
