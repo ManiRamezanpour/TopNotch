@@ -12,7 +12,7 @@ import SwiftUI
     }
 }
 
-enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, msgs, sys }
+enum Tab: String, CaseIterable { case agents = "ai", music, clip, notes, cal, msgs, sys }
 
 /// A few seconds of news: the island drops into a card. Hovering it opens `tab`.
 struct Flash: Equatable {
@@ -313,6 +313,17 @@ func selftest() {
     let sl = Notifs.parse(id: 8, bundle: "com.tinyspeck.slackmacgap", data: blob)!
     precondition(sl.tag == "SL" && sl.appName == "Slack" && Notifs.parse(id: 9, bundle: "net.whatsapp.WhatsApp", data: blob)!.tag == "WA")
     precondition(Notifs.parse(id: 1, bundle: "x", data: Data("junk".utf8)) == nil)
+
+    // jalali: Nowruz boundaries, Saturday-first padding, fixed holidays and Fridays
+    var greg = Calendar(identifier: .gregorian); greg.timeZone = Jalali.cal.timeZone
+    let gd = { (y: Int, m: Int, d: Int) in greg.date(from: DateComponents(year: y, month: m, day: d, hour: 12))! }
+    precondition(Jalali.ymd(gd(2026, 3, 21)) == (1405, 1, 1) && Jalali.ymd(gd(2026, 3, 20)) == (1404, 12, 29))
+    precondition(Jalali.ymd(gd(2025, 3, 20)) == (1403, 12, 30) && Jalali.ymd(gd(2026, 10, 21)) == (1405, 7, 29))
+    precondition(Jalali.holiday(gd(2026, 3, 21)) == "نوروز" && Jalali.holiday(gd(2026, 4, 2)) == "روز طبیعت")
+    precondition(Jalali.off(gd(2026, 10, 23)) && !Jalali.off(gd(2026, 10, 21)))  // a Friday, then a Wednesday
+    let mehr = Jalali.grid(Jalali.month(of: gd(2026, 10, 21)))
+    precondition(mehr.count == 4 + 30 && mehr[4].map { Jalali.ymd($0) } ?? (0, 0, 0) == (1405, 7, 1))  // 1 Mehr 1405 is a Wednesday
+    precondition(Jalali.num(1405) == "۱۴۰۵" && Jalali.year(gd(2026, 3, 20)).nowruz == 1)
 
     for name in symbols { precondition(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)") }
 
