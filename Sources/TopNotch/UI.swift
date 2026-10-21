@@ -13,6 +13,7 @@ extension Color {
     static let volt = Color(red: 0.86, green: 1.0, blue: 0.36)
     static let tg = Color(red: 0.18, green: 0.68, blue: 0.95)
     static let wa = Color(red: 0.16, green: 0.85, blue: 0.42)
+    static let slack = Color(red: 0.88, green: 0.12, blue: 0.35)
     static let fg = Color.white.opacity(0.93)   // read this
     static let fg2 = Color.white.opacity(0.60)  // supporting
     static let fg3 = Color.white.opacity(0.36)  // labels, chrome
@@ -42,9 +43,9 @@ extension Tab {
 }
 
 extension Notif {
-    var brand: Color { tag == "WA" ? .wa : .tg }
-    var icon: String { tag == "WA" ? "phone.bubble.fill" : "paperplane.fill" }
-    var appName: String { tag == "WA" ? "WhatsApp" : "Telegram" }
+    var brand: Color { tag == "WA" ? .wa : tag == "SL" ? .slack : .tg }
+    var icon: String { tag == "WA" ? "phone.bubble.fill" : tag == "SL" ? "number" : "paperplane.fill" }
+    var appName: String { tag == "WA" ? "WhatsApp" : tag == "SL" ? "Slack" : "Telegram" }
 }
 
 /// Every SF Symbol the UI uses — the selftest checks they exist on this macOS.
@@ -274,6 +275,7 @@ struct Collapsed: View {
                 }
                 MsgBadge(icon: "paperplane.fill", color: .tg, count: notifs.badges["Telegram"])
                 MsgBadge(icon: "phone.bubble.fill", color: .wa, count: notifs.badges["WhatsApp"])
+                MsgBadge(icon: "number", color: .slack, count: notifs.badges["Slack"])
             }
         }
     }
@@ -882,7 +884,7 @@ struct ClipPane: View {
     }
 }
 
-// MARK: - WhatsApp / Telegram
+// MARK: - WhatsApp / Telegram / Slack
 
 struct MsgsPane: View {
     let n: Notifs
@@ -893,6 +895,7 @@ struct MsgsPane: View {
             Header(icon: "bubble.left.and.bubble.right.fill", title: "Messages", sub: "\(n.items.count) recent", color: .violet) {
                 Pill(icon: "paperplane.fill", text: "telegram", color: .tg)
                 Pill(icon: "phone.bubble.fill", text: "whatsapp", color: .wa)
+                Pill(icon: "number", text: "slack", color: .slack)
             }
             if n.denied {
                 VStack(alignment: .leading, spacing: 10) {

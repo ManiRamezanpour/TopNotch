@@ -310,6 +310,8 @@ func selftest() {
                                                   format: .binary, options: 0)
     let n = Notifs.parse(id: 7, bundle: "ru.keepcoder.Telegram", data: blob)!
     precondition(n.tag == "TG" && n.title == "Ali" && n.body == "yo" && n.date == Date(timeIntervalSinceReferenceDate: 0))
+    let sl = Notifs.parse(id: 8, bundle: "com.tinyspeck.slackmacgap", data: blob)!
+    precondition(sl.tag == "SL" && sl.appName == "Slack" && Notifs.parse(id: 9, bundle: "net.whatsapp.WhatsApp", data: blob)!.tag == "WA")
     precondition(Notifs.parse(id: 1, bundle: "x", data: Data("junk".utf8)) == nil)
 
     for name in symbols { precondition(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)") }

@@ -371,12 +371,15 @@ struct Agent: Identifiable {
     }
 }
 
-// MARK: - WhatsApp / Telegram notifications, read from Notification Center's own DB (needs Full Disk Access)
+// MARK: - WhatsApp / Telegram / Slack notifications, read from Notification Center's own DB (needs Full Disk Access)
 
 struct Notif: Identifiable {
     let id = UUID()
     let rec: Int64, bundle: String, title: String, body: String, date: Date
-    var tag: String { bundle.lowercased().contains("whatsapp") ? "WA" : "TG" }
+    var tag: String {
+        let b = bundle.lowercased()
+        return b.contains("whatsapp") ? "WA" : b.contains("tinyspeck") || b.contains("slack") ? "SL" : "TG"
+    }
 }
 
 @Observable final class Notifs {
@@ -387,7 +390,8 @@ struct Notif: Identifiable {
     // q only. Keyed by row id + blob, NOT "id > last": apps delete read notifications and sqlite reuses the max rowid.
     @ObservationIgnored private var seen: Set<String>?   // nil = first read, load history silently
     @ObservationIgnored private let q = DispatchQueue(label: "topnotch.notifs")
-    static let bundles = ["net.whatsapp.whatsapp", "desktop.whatsapp", "ru.keepcoder.telegram", "org.telegram.desktop"]
+    static let bundles = ["net.whatsapp.whatsapp", "desktop.whatsapp", "ru.keepcoder.telegram", "org.telegram.desktop",
+                          "com.tinyspeck.slackmacgap"]  // lowercase: matched against lower(identifier)
     static let db = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Group Containers/group.com.apple.usernoted/db2/db").path
 
@@ -426,7 +430,8 @@ struct Notif: Identifiable {
     }
 
     @ObservationIgnored private var bannerSeen: Set<String>?  // q only; nil = first scan, silent
-    static let bannerApps = ["Telegram": "ru.keepcoder.Telegram", "WhatsApp": "net.whatsapp.WhatsApp"]
+    static let bannerApps = ["Telegram": "ru.keepcoder.Telegram", "WhatsApp": "net.whatsapp.WhatsApp",
+                             "Slack": "com.tinyspeck.slackmacgap"]
 
     /// NotificationCenter window → … → AXGroup[AXNotificationCenterBanner] desc="App, title, sub, body" with
     /// AXStaticText children id=title/subtitle/body. Needs Accessibility.
