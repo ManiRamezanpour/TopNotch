@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// MARK: - Claude Code bridge: hooks hand permission prompts and questions to the menu bar popover
+// MARK: - Claude Code bridge: hooks hand permission prompts and questions to the notch
 //
 // Claude Code runs `TopNotch --hook` for each hook event (installed into ~/.claude/settings.json from the
 // Agents tab). The client forwards the event over a unix socket. For PermissionRequest and AskUserQuestion it

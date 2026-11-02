@@ -2,7 +2,7 @@
 
 A geeky Dynamic Island for the MacBook notch. Hover the notch and it springs open into a black HUD panel.
 
-- **Claude Code:** a menu bar item beside Wi-Fi and Control Center shows sessions, approvals, current usage, model limits, credits and a seven-day hourly activity grid. Allow, deny or answer requests, then jump back to the right terminal. Session details are read locally; account usage uses Claude Code's OAuth credential and usage endpoint.
+- **Claude Code:** in the notch: live sessions and ones waiting on you, with Allow, Deny and answer cards for Claude's prompts, then a jump back to the right terminal. Shows your 5-hour and weekly limits, with model limits, credits and a seven-day activity grid one click away. Session details are read locally; account usage uses Claude Code's OAuth credential and usage endpoint.
 - **Music:** Apple Music and Spotify controls, album art and seeking, plus time-synced lyrics from [LRCLIB](https://lrclib.net). The line being sung right now can show big under the notch.
 - **Clipboard:** history of what you copy. Password-manager copies are skipped, and nothing is stored on disk.
 - **Notes:** a scratchpad that saves automatically.

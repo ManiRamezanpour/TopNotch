@@ -49,8 +49,6 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
     let coach = Coach()
     let stats = Stats()
     let bridge = Bridge()
-    var claudeStatusItem: NSStatusItem!
-    let claudePopover = NSPopover()
     var panel: NotchPanel!
     let side = Side()
     var sideWindow: NotchPanel!
@@ -88,7 +86,6 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
         coach.canInterrupt = { [weak self] in self?.side.mode == .idle }
         coach.onDue = { [weak self] r in self?.remind(r) }
 
-        installClaudeStatusItem()
 
         place()
         panel.orderFrontRegardless()
@@ -119,63 +116,27 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
         AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary)
         agents.onDone = { [weak self] name in
             NSSound(named: "Glass")?.play()
-            self?.refreshClaudeStatusItem()
+            self?.ping(Flash(icon: "checkmark.seal.fill", color: .neon, app: "Claude Code", title: name,
+                             body: "done · your turn", tab: .agents, secs: 5))
         }
-        bridge.onAsk = { [weak self] _ in
+        bridge.onAsk = { [weak self] a in
             NSSound(named: "Ping")?.play()
-            self?.refreshClaudeStatusItem()
+            self?.ping(Flash(icon: "hand.raised.fill", color: .amber, app: "Claude Code", title: a.project,
+                             body: a.kind == .question ? "has a question" : "needs your ok", tab: .agents, secs: 10))
         }
         Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { if let self { self.bridge.discover(self.agents.live); self.refreshClaudeStatusItem() } }
+            MainActor.assumeIsolated { if let self { self.bridge.discover(self.agents.live) } }
         }
         stats.onEvent = { [weak self] f in self?.ping(f) }
         notifs.onNew = { [weak self] n in
             // who texted, never what: "Mani → arshyrzd" (Telegram multi-account) → "Mani"
             let who = n.title.components(separatedBy: " → ").first ?? n.title
-            self?.ping(Flash(icon: n.icon, color: n.brand, app: n.appName, title: who.isEmpty ? n.appName : who,
+            self?.ping(Flash(icon: n.icon, color: n.brand, app: n.appName, title: who.isEmpty ? "New message" : who,
                              body: n.appName, tab: .msgs, secs: 7))
         }
 
         let ev = NSAppleEventManager.shared().currentAppleEvent
         if ev?.paramDescriptor(forKeyword: keyAELaunchedAsLogInItem)?.booleanValue != true { pin() }
-    }
-
-    private func installClaudeStatusItem() {
-        claudeStatusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = claudeStatusItem.button {
-            let image = NSImage(systemSymbolName: "chevron.left.forwardslash.chevron.right", accessibilityDescription: "Claude Code")
-            image?.isTemplate = true
-            button.image = image
-            button.target = self
-            button.action = #selector(toggleClaudePopover)
-            button.toolTip = "Claude Code sessions and approvals"
-        }
-        claudePopover.behavior = .transient
-        claudePopover.animates = true
-        claudePopover.contentSize = NSSize(width: 500, height: 680)
-        claudePopover.contentViewController = NSHostingController(rootView: ClaudeStatusPopover(agents: agents, bridge: bridge))
-        refreshClaudeStatusItem()
-    }
-
-    private func refreshClaudeStatusItem() {
-        guard let button = claudeStatusItem?.button else { return }
-        let waiting = bridge.asks.count
-        let running = agents.live.count
-        button.title = waiting > 0 ? " \(waiting)" : running > 0 ? " \(running)" : ""
-        button.contentTintColor = waiting > 0 ? .systemOrange : nil
-        button.toolTip = waiting > 0
-            ? "\(waiting) Claude Code request\(waiting == 1 ? "" : "s") waiting for you"
-            : "Claude Code · \(running) active session\(running == 1 ? "" : "s")"
-    }
-
-    @objc private func toggleClaudePopover() {
-        guard let button = claudeStatusItem.button else { return }
-        if claudePopover.isShown {
-            claudePopover.performClose(nil)
-        } else {
-            claudePopover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 
     /// Opened from Finder/Launchpad/Spotlight, or clicked again while running.
@@ -307,6 +268,7 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
     func setOpen(_ open: Bool) {
         closeWork = nil
         openWork?.cancel(); openWork = nil
+        if open, !bridge.asks.isEmpty { state.tab = .agents }  // Claude is waiting: that's why you're here
         if open, let f = state.flash { state.tab = f.tab; state.flash = nil }  // hovering a toast takes you to it
         withAnimation(.spring(response: 0.38, dampingFraction: 0.78)) { state.open = open }
         panel.ignoresMouseEvents = !(open && panel.frame.contains(NSEvent.mouseLocation))
@@ -363,6 +325,16 @@ func selftest() {
     let sl = Notifs.parse(id: 8, bundle: "com.tinyspeck.slackmacgap", data: blob)!
     precondition(sl.tag == "SL" && sl.appName == "Slack" && Notifs.parse(id: 9, bundle: "net.whatsapp.WhatsApp", data: blob)!.tag == "WA")
     precondition(Notifs.parse(id: 1, bundle: "x", data: Data("junk".utf8)) == nil)
+    // WhatsApp arrives with no banner (styl 0) and no title; only that case pops from the DB
+    func row(_ styl: Int) -> Data {
+        try! PropertyListSerialization.data(fromPropertyList: ["styl": styl, "req": ["body": "x"]] as [String: Any], format: .binary, options: 0)
+    }
+    precondition(Notifs.parse(id: 2, bundle: "net.whatsapp.whatsapp", data: row(0))!.noBanner)
+    precondition(!Notifs.parse(id: 3, bundle: "net.whatsapp.whatsapp", data: row(1))!.noBanner)
+    precondition(!Notifs.parse(id: 4, bundle: "ru.keepcoder.telegram", data: row(0))!.noBanner)
+    precondition(Notifs.focusActive(Data(#"{"data":[{"storeAssertionRecords":[{"a":1}]}]}"#.utf8)))
+    precondition(!Notifs.focusActive(Data(#"{"data":[{"storeInvalidationRecords":[]}]}"#.utf8)))
+    precondition(!Notifs.focusActive(Data("junk".utf8)))
 
     // jalali: Nowruz boundaries, Saturday-first padding, fixed holidays and Fridays
     var greg = Calendar(identifier: .gregorian); greg.timeZone = Jalali.cal.timeZone

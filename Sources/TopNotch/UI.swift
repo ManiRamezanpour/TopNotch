@@ -63,7 +63,7 @@ let symbols = Tab.allCases.map(\.icon) + [
     "xmark", "note.text", "textformat.size.smaller", "textformat.size.larger",
     "heart.fill", "flame.fill", "eye", "figure.mind.and.body", "hand.raised.fingers.spread", "figure.stand", "drop.fill",
     "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
-    "hand.raised.fill", "hand.raised.fingers.spread.fill",
+    "hand.raised.fill", "hand.raised.fingers.spread.fill", "chart.bar.fill", "list.bullet",
     "questionmark.bubble.fill", "questionmark", "arrow.up.forward.app", "arrow.right", "link", "checkmark.seal.fill",
     "memorychip", "network", "arrow.down", "arrow.up", "internaldrive", "thermometer.medium", "clock",
     "music.note.list", "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
@@ -204,7 +204,7 @@ struct NotchView: View {
                         .transition(.asymmetric(insertion: .opacity.combined(with: .scale(scale: 0.92, anchor: .top)).animation(spring.delay(0.06)),
                                                 removal: .opacity.animation(.easeOut(duration: 0.12))))
                 } else {
-                    Collapsed(s: s, music: music, agents: agents, notifs: notifs, stats: stats, lyric: lyricIsland)
+                    Collapsed(s: s, music: music, agents: agents, notifs: notifs, stats: stats, bridge: bridge, lyric: lyricIsland)
                         .transition(.opacity.animation(.easeInOut(duration: 0.18)))
                 }
             }
@@ -220,7 +220,7 @@ struct NotchView: View {
 // MARK: - Collapsed
 
 struct Collapsed: View {
-    let s: NotchState, music: Music, agents: Agents, notifs: Notifs, stats: Stats, lyric: Bool
+    let s: NotchState, music: Music, agents: Agents, notifs: Notifs, stats: Stats, bridge: Bridge, lyric: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -244,6 +244,10 @@ struct Collapsed: View {
     @ViewBuilder var left: some View {
         do {
             HStack(spacing: 10) {
+                let yours = agents.live.filter { $0.state == .wait }.count
+                if !bridge.asks.isEmpty { count("hand.raised.fill", bridge.asks.count, .amber, pulse: true) }
+                if agents.live.count > yours { count("sparkle", agents.live.count - yours, .neon, pulse: true) }
+                if yours > 0 { count("hand.wave.fill", yours, .amber, pulse: false) }
                 if music.playing {
                     HStack(spacing: 5) {
                         if let a = music.art {
@@ -397,7 +401,7 @@ struct Expanded: View {
 
             Group {
                 switch s.tab {
-                case .agents: ClaudeMenuHint()
+                case .agents: AgentsPane(agents: agents, bridge: bridge)
                 case .music: MusicPane(m: music)
                 case .clip: ClipPane(clip: clip)
                 case .notes: NotesPane()
@@ -470,12 +474,11 @@ func ago(_ d: Date) -> String {
 
 struct AgentsPane: View {
     let agents: Agents, bridge: Bridge
-    var displayAsks = true
-    var displayUsage = true
+    @State private var showUsage = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if displayAsks, !bridge.asks.isEmpty {
+            if !bridge.asks.isEmpty {
                 ScrollView {
                     VStack(spacing: 6) {
                         ForEach(bridge.asks) { a in
@@ -485,6 +488,8 @@ struct AgentsPane: View {
                     }
                 }
                 .scrollIndicators(.never)
+            } else if showUsage {
+                usage
             } else {
                 list
             }
@@ -493,7 +498,7 @@ struct AgentsPane: View {
 
     @ViewBuilder var list: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if displayUsage { limits }
+            limits
             if !bridge.connected { connect }
             let live = agents.live.filter { $0.state != .wait }, yours = agents.live.filter { $0.state == .wait }
             if agents.live.isEmpty {
@@ -530,43 +535,63 @@ struct AgentsPane: View {
         }
     }
 
+    /// Real account limits when Anthropic answers, otherwise the local token estimate.
     var limits: some View {
-        let frac = min(1, Double(agents.block) / Double(agents.peak))
+        let real = agents.accountSession
+        let frac = real.map { min(1, max(0, $0.percent / 100)) } ?? min(1, Double(agents.block) / Double(agents.peak))
         let color: Color = frac > 0.85 ? .hot : frac > 0.6 ? .amber : .neon
+        let reset = real?.resetsAt ?? agents.blockEnd
         return HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Caps(text: "5h window")
+                    Caps(text: real == nil ? "5h window" : "5h limit")
                     Spacer()
-                    Text("\(Int(frac * 100))% of peak").font(mono(10, .bold)).foregroundStyle(color)
+                    Text("\(Int((frac * 100).rounded()))%\(real == nil ? " of peak" : " used")").font(mono(10, .bold)).foregroundStyle(color)
                 }
                 Meter(frac: frac)
             }
-            stat("bolt.fill", fmtTok(agents.block), "used", color)
-            if let end = agents.blockEnd {
+            if let reset {
                 TimelineView(.periodic(from: .now, by: 1)) { tl in
-                    stat("arrow.clockwise", hhmm(end.timeIntervalSince(tl.date)), "resets", .ice)
+                    stat("arrow.clockwise", hhmm(reset.timeIntervalSince(tl.date)), "resets", .ice)
                 }
             }
-            stat("calendar", fmtTok(agents.week), "7 days", .fg2)
+            stat("calendar", agents.accountWeek.map { "\(Int($0.percent.rounded()))%" } ?? fmtTok(agents.week), "7 days", .fg2)
+            Button { withAnimation(spring) { showUsage = true } } label: { Pill(icon: "chart.bar.fill", text: "usage", color: .claude) }
+                .buttonStyle(Press())
+                .help("model limits, credits and activity")
             if bridge.connected {
                 Button { bridge.connect(false) } label: {
                     Image(systemName: "link").font(.system(size: 11, weight: .bold)).foregroundStyle(Color.neon)
                 }
                 .buttonStyle(Press())
-                .help("disable menu bar approvals and return prompts to Claude Code")
+                .help("stop answering prompts from the notch and return them to Claude Code")
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .card()
-        .help("tokens (in + cache writes + out) in the current 5h window, vs your busiest window this week")
+    }
+
+    var usage: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "chart.bar.fill").font(.system(size: 12, weight: .semibold)).foregroundStyle(Color.claude)
+                Text("Claude usage").font(sans(13, .semibold))
+                Spacer()
+                Button { withAnimation(spring) { showUsage = false } } label: { Pill(icon: "list.bullet", text: "sessions", color: .neon) }
+                    .buttonStyle(Press())
+            }
+            HStack(alignment: .top, spacing: 8) {
+                ScrollView { UsageOverview(agents: agents) }.scrollIndicators(.never)
+                ActivityHeatmap(days: agents.activity).fixedSize()
+            }
+        }
     }
 
     var connect: some View {
         HStack(spacing: 10) {
             Image(systemName: "hand.raised.fill").font(.system(size: 13)).foregroundStyle(Color.amber)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Approve, deny and answer Claude from the menu bar").font(sans(12, .semibold))
+                Text("Approve, deny and answer Claude from the notch").font(sans(12, .semibold))
                 Caps(text: bridge.setupError ?? "adds TopNotch hooks to ~/.claude/settings.json", color: bridge.setupError == nil ? .fg3 : .hot)
             }
             Spacer()
@@ -588,25 +613,12 @@ struct AgentsPane: View {
     }
 }
 
-struct ClaudeMenuHint: View {
-    var body: some View {
-        VStack(spacing: 9) {
-            Image(systemName: "chevron.left.forwardslash.chevron.right")
-                .font(.system(size: 22, weight: .medium)).foregroundStyle(Color.claude)
-            Text("Claude Code is in the menu bar")
-                .font(sans(14, .semibold)).foregroundStyle(Color.fg)
-            Caps(text: "open the terminal icon beside Wi-Fi for sessions and approvals")
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
 /// Segmented usage meter: green → amber → red by position, lit segments glow.
 struct Meter: View {
     let frac: Double
+    var n = 36
     var body: some View {
-        let n = 36, on = Int((frac * Double(n)).rounded(.up))
+        let on = Int((frac * Double(n)).rounded(.up))
         HStack(spacing: 2) {
             ForEach(0..<n, id: \.self) { i in
                 let p = Double(i) / Double(n)

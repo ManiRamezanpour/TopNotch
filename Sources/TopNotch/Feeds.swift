@@ -537,6 +537,7 @@ struct ExtraUsage {
 struct Notif: Identifiable {
     let id = UUID()
     let rec: Int64, bundle: String, title: String, body: String, date: Date
+    var noBanner = false   // macOS stores it but never shows a banner (WhatsApp), so the DB is the only signal
     var tag: String {
         let b = bundle.lowercased()
         return b.contains("whatsapp") ? "WA" : b.contains("tinyspeck") || b.contains("slack") ? "SL" : "TG"
@@ -685,7 +686,10 @@ struct Notif: Identifiable {
             self.denied = false
             // With Accessibility, only an on-screen banner pops the card: macOS hides banners under
             // Do Not Disturb / Focus, so the notch stays quiet too. The DB still logs + counts them.
-            self.add(new, ping: !silent && !AXIsProcessTrusted(), count: !silent)
+            self.add(new.filter { !$0.noBanner }, ping: !silent && !AXIsProcessTrusted(), count: !silent)
+            // WhatsApp never gets a banner, so its DB row is the signal; Focus has to be checked by hand here.
+            let bannerless = new.filter(\.noBanner)
+            self.add(bannerless, ping: !silent && !bannerless.isEmpty && !Self.focusOn(), count: !silent)
         }
     }
 
@@ -695,7 +699,20 @@ struct Notif: Identifiable {
               let req = pl["req"] as? [String: Any] else { return nil }
         let title = [req["titl"], req["subt"]].compactMap { $0 as? String }.filter { !$0.isEmpty }.joined(separator: " · ")
         return Notif(rec: id, bundle: bundle, title: title, body: req["body"] as? String ?? "",
-                     date: (pl["date"] as? Double).map(Date.init(timeIntervalSinceReferenceDate:)) ?? Date())
+                     date: (pl["date"] as? Double).map(Date.init(timeIntervalSinceReferenceDate:)) ?? Date(),
+                     noBanner: bundle.lowercased().contains("whatsapp") && pl["styl"] as? Int == 0)
+    }
+
+    /// A manually enabled Do Not Disturb / Focus. ponytail: scheduled Focus isn't in this file, read Settings.sqlite if it matters.
+    static func focusOn() -> Bool {
+        let f = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/DoNotDisturb/DB/Assertions.json")
+        return (try? Data(contentsOf: f)).map(focusActive) ?? false
+    }
+
+    static func focusActive(_ d: Data) -> Bool {
+        let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+        let first = (j?["data"] as? [[String: Any]])?.first
+        return !((first?["storeAssertionRecords"] as? [Any])?.isEmpty ?? true)
     }
 
     func open(_ n: Notif) {

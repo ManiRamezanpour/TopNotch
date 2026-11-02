@@ -1,68 +1,16 @@
 import SwiftUI
 
-struct ClaudeStatusPopover: View {
-    let agents: Agents
-    let bridge: Bridge
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                Image(systemName: "chevron.left.forwardslash.chevron.right")
-                    .font(.system(size: 15, weight: .semibold)).foregroundStyle(Color.claude)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Claude Code").font(sans(14, .semibold)).foregroundStyle(Color.fg)
-                    Caps(text: subtitle)
-                }
-                Spacer()
-                if !bridge.asks.isEmpty {
-                    Pill(icon: "hand.raised.fill", text: "\(bridge.asks.count) waiting", color: .amber)
-                }
-            }
-            .padding(.bottom, 2)
-
-            UsageOverview(agents: agents)
-
-            if !bridge.asks.isEmpty {
-                ScrollView {
-                    VStack(spacing: 7) {
-                        ForEach(bridge.asks) { ask in
-                            AskCard(a: ask, bridge: bridge, agent: agents.live.first { $0.id == ask.session })
-                                .transition(.opacity.combined(with: .move(edge: .top)))
-                        }
-                    }
-                }
-                .scrollIndicators(.never)
-                .frame(maxHeight: 190)
-            }
-
-            AgentsPane(agents: agents, bridge: bridge, displayAsks: false, displayUsage: false)
-                .frame(maxHeight: .infinity)
-
-            ActivityHeatmap(days: agents.activity)
-        }
-        .padding(13)
-        .frame(width: 500, height: 680, alignment: .topLeading)
-        .background(Color(red: 0.035, green: 0.04, blue: 0.055))
-        .preferredColorScheme(.dark)
-    }
-
-    var subtitle: String {
-        let sessions = agents.live.count
-        return "\(sessions) active session\(sessions == 1 ? "" : "s") · local only"
-    }
-}
-
-private struct UsageOverview: View {
+struct UsageOverview: View {
     let agents: Agents
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                tile("CURRENT · 5H", value: currentValue, detail: currentDetail, color: .ice,
+                tile("5h limit", value: currentValue, detail: currentDetail, color: .ice,
                      progress: agents.accountSession?.percent)
-                tile("ALL MODELS · 7D", value: weekValue, detail: "account limit", color: .neon,
+                tile("7d limit", value: weekValue, detail: "all models", color: .neon,
                      progress: agents.accountWeek?.percent)
-                tile("USAGE CREDITS", value: creditValue, detail: creditDetail, color: .amber,
+                tile("credits", value: creditValue, detail: creditDetail, color: .amber,
                      progress: creditProgress)
             }
             if !agents.accountModels.isEmpty {
@@ -101,7 +49,7 @@ private struct UsageOverview: View {
             Text(value).font(sans(13, .semibold)).foregroundStyle(Color.fg).lineLimit(1).minimumScaleFactor(0.75)
             Text(detail).font(mono(8)).foregroundStyle(Color.fg3).lineLimit(1).minimumScaleFactor(0.7)
             if let progress {
-                Meter(frac: min(1, max(0, progress / 100)))
+                Meter(frac: min(1, max(0, progress / 100)), n: 14)
             } else {
                 Color.clear.frame(height: 9)
             }
@@ -153,10 +101,10 @@ private struct UsageOverview: View {
     }
 }
 
-private struct ActivityHeatmap: View {
+struct ActivityHeatmap: View {
     let days: [[Int]]
-    private let cell: CGFloat = 12
-    private let gap: CGFloat = 3
+    private let cell: CGFloat = 10
+    private let gap: CGFloat = 2
 
     var total: Int { days.flatMap { $0 }.reduce(0, +) }
 
