@@ -46,14 +46,13 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
     let clip = Clip()
     let agents = Agents()
     let notifs = Notifs()
-    let coach = Coach()
     let stats = Stats()
     let bridge = Bridge()
+    let shelf = Shelf()
+    var shelfWindow: NotchPanel!
+    var shelfClose: DispatchWorkItem?
+    var dragBase = NSPasteboard(name: .drag).changeCount   // a new drag changes this while the button is down
     var panel: NotchPanel!
-    let side = Side()
-    var sideWindow: NotchPanel!
-    var sideClose: DispatchWorkItem?
-    var inRemind = false  // pointer was already on the reminder card when it appeared
     var closeWork: DispatchWorkItem?
     var openWork: DispatchWorkItem?
     /// How long the pointer has to rest on the notch before it opens, so sweeping across the menu bar doesn't pop it.
@@ -72,24 +71,30 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
         panel.becomesKeyOnlyIfNeeded = true  // only text fields grab the keyboard (and pin it open)
         panel.contentView = FirstClickHost(rootView: NotchView(s: state, music: music, clip: clip, agents: agents, notifs: notifs, stats: stats, bridge: bridge))
 
-        // health reminders live in a liquid tab on the right screen edge, above the Dock
-        sideWindow = NotchPanel(contentRect: .init(origin: .zero, size: Side.canvas),
-                                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        sideWindow.isOpaque = false
-        sideWindow.backgroundColor = .clear
-        sideWindow.hasShadow = false
-        sideWindow.level = .statusBar
-        sideWindow.collectionBehavior = panel.collectionBehavior
-        sideWindow.ignoresMouseEvents = true
-        sideWindow.becomesKeyOnlyIfNeeded = true
-        sideWindow.contentView = FirstClickHost(rootView: SideView(side: side, coach: coach))
-        coach.canInterrupt = { [weak self] in self?.side.mode == .idle }
-        coach.onDue = { [weak self] r in self?.remind(r) }
-
+        // the drop shelf: a liquid tab on the right screen edge, above the Dock
+        shelfWindow = NotchPanel(contentRect: .init(origin: .zero, size: Shelf.canvas),
+                                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        shelfWindow.isOpaque = false
+        shelfWindow.backgroundColor = .clear
+        shelfWindow.hasShadow = false
+        shelfWindow.level = .statusBar
+        shelfWindow.collectionBehavior = panel.collectionBehavior
+        shelfWindow.ignoresMouseEvents = true
+        shelfWindow.becomesKeyOnlyIfNeeded = true
+        shelfWindow.contentView = FirstClickHost(rootView: ShelfView(shelf: shelf))
+        shelf.onShot = { [weak self] i in self?.showShot(i) }
+        Shelf.window = shelfWindow
+        // a drag from Finder doesn't always reach global monitors, so poll while a button is held
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, NSEvent.pressedMouseButtons != 0 || self.shelf.mode == .drop else { return }
+                self.trackShelf(NSEvent.mouseLocation)
+            }
+        }
 
         place()
         panel.orderFrontRegardless()
-        sideWindow.orderFrontRegardless()
+        shelfWindow.orderFrontRegardless()
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -161,65 +166,86 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
         }
         let c = Self.canvas
         panel.setFrame(NSRect(x: f.midX - c.width / 2, y: f.maxY - c.height, width: c.width, height: c.height), display: true)
-        let v = scr.visibleFrame, sc = Side.canvas  // visibleFrame stops above the Dock
-        sideWindow.setFrame(NSRect(x: f.maxX - sc.width, y: v.minY + 6, width: sc.width, height: sc.height), display: true)
+        let v = scr.visibleFrame, sc = Shelf.canvas  // visibleFrame stops above the Dock
+        shelfWindow.setFrame(NSRect(x: f.maxX - sc.width, y: v.minY + 6, width: sc.width, height: sc.height), display: true)
     }
 
-    // MARK: edge tab
+    // MARK: drop shelf
 
-    /// The tab's current card, in screen coordinates (for hover / touch tests).
-    var sideRect: NSRect {
-        let f = sideWindow.frame, g = side.geo
-        return NSRect(x: f.maxX - g.w - 8, y: f.minY + Side.base - 6, width: g.w + 8, height: g.h + 12)
+    /// The shelf's current shape, in screen coordinates (for hover tests).
+    var shelfRect: NSRect {
+        let f = shelfWindow.frame, g = shelf.geo
+        return NSRect(x: f.maxX - g.w - 8, y: f.minY + Shelf.base - 6, width: g.w + 8, height: g.h + 12)
     }
 
-    func remind(_ r: Routine) {
-        sideClose?.cancel()
-        sideWindow.ignoresMouseEvents = true
-        side.ends = Date().addingTimeInterval(Side.hold)
-        side.mode = .remind(r)
-        inRemind = sideRect.contains(NSEvent.mouseLocation)
-        NSSound(named: "Tink")?.play()
-        DispatchQueue.main.asyncAfter(deadline: .now() + Side.hold) { [weak self] in
-            MainActor.assumeIsolated { if self?.side.mode == .remind(r) { self?.side.mode = .idle } }
+    func showShot(_ i: ShelfItem) {
+        NSSound(named: "Pop")?.play()
+        withAnimation(spring) { shelf.mode = .shot(i.id) }
+        closeShelf(after: 8)
+    }
+
+    /// Fold back into the edge, unless the pointer is resting on it (leaving it schedules the close again).
+    func closeShelf(after secs: Double) {
+        shelfClose?.cancel()
+        let w = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.shelfClose = nil
+                if self.shelf.sharing || self.shelfRect.insetBy(dx: -14, dy: -14).contains(NSEvent.mouseLocation) { return }
+                withAnimation(spring) { self.shelf.mode = .idle }
+                self.shelfWindow.ignoresMouseEvents = true
+            }
         }
+        shelfClose = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + secs, execute: w)
     }
 
-    /// Magnet when the pointer approaches, pours open into the menu on touch, touch-and-go for reminders.
-    func trackSide(_ p: NSPoint) {
-        let f = sideWindow.frame
-        switch side.mode {
+    /// Magnet near the edge, swells into a drop target while you drag, pours open on touch.
+    func trackShelf(_ p: NSPoint) {
+        let f = shelfWindow.frame, pressed = NSEvent.pressedMouseButtons != 0
+        let cc = NSPasteboard(name: .drag).changeCount
+        if !pressed { dragBase = cc }
+        let dragging = pressed && cc != dragBase
+        let anchor = NSPoint(x: f.maxX, y: f.minY + Shelf.base + 23)
+        let d = hypot(p.x - anchor.x, p.y - anchor.y)
+        switch shelf.mode {
         case .idle:
-            let anchor = NSPoint(x: f.maxX, y: f.minY + Side.base + side.geo.h / 2)
-            let m = max(0, 1 - hypot(p.x - anchor.x, p.y - anchor.y) / 170)
-            if abs(m - side.magnet) > 0.02 || (m == 0) != (side.magnet == 0) {
-                side.magnet = m
-                side.pullY = min(f.height, max(0, f.maxY - p.y))
+            if dragging, d < 260 {
+                shelf.magnet = 0
+                withAnimation(spring) { shelf.mode = .drop }
+                shelfWindow.ignoresMouseEvents = false   // so the drop can land
+                return
             }
-            if p.x > f.maxX - 30, abs(p.y - anchor.y) < 44 {
-                side.magnet = 0
-                side.mode = .menu
-                sideWindow.ignoresMouseEvents = false
+            let m = max(0, 1 - d / 170)
+            if abs(m - shelf.magnet) > 0.02 || (m == 0) != (shelf.magnet == 0) {
+                shelf.magnet = m
+                shelf.pullY = min(f.height, max(0, f.maxY - p.y))
             }
-        case .menu:
-            if NSEvent.pressedMouseButtons == 0 { sideWindow.ignoresMouseEvents = !sideRect.contains(p) }
-            if sideRect.insetBy(dx: -14, dy: -14).contains(p) {
-                sideClose?.cancel(); sideClose = nil
-            } else if sideClose == nil {
-                let w = DispatchWorkItem { [weak self] in
+            if !pressed, p.x > f.maxX - 30, abs(p.y - anchor.y) < 44 {
+                shelf.magnet = 0
+                withAnimation(spring) { shelf.mode = .open }
+                shelfWindow.ignoresMouseEvents = false
+            }
+        case .drop:
+            if pressed, d > 340 {   // dragged away: let it go back to sleep
+                withAnimation(spring) { shelf.mode = .idle }
+                shelfWindow.ignoresMouseEvents = true
+            } else if !pressed {   // released: the drop handler opens the shelf; otherwise it went elsewhere
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     MainActor.assumeIsolated {
-                        self?.side.mode = .idle
-                        self?.sideWindow.ignoresMouseEvents = true
-                        self?.sideClose = nil
+                        guard let self, self.shelf.mode == .drop else { return }
+                        withAnimation(spring) { self.shelf.mode = .idle }
+                        self.shelfWindow.ignoresMouseEvents = true
                     }
                 }
-                sideClose = w
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
             }
-        case .remind:
-            let inside = sideRect.contains(p)
-            if inside && !inRemind { side.mode = .idle }   // touch to dismiss early
-            inRemind = inside
+        case .open, .shot:
+            if !pressed { shelfWindow.ignoresMouseEvents = !shelfRect.contains(p) }
+            if shelfRect.insetBy(dx: -14, dy: -14).contains(p) {
+                shelfClose?.cancel(); shelfClose = nil
+            } else if shelfClose == nil, !pressed, !shelf.sharing {   // never fold up mid-drag or under the share menu
+                closeShelf(after: shelf.mode == .open ? 0.25 : 1.5)
+            }
         }
     }
 
@@ -230,7 +256,7 @@ final class FirstClickHost<V: View>: NSHostingView<V> {
 
     func track() {
         let p = NSEvent.mouseLocation, f = panel.frame
-        trackSide(p)
+        trackShelf(p)
         if state.flash != nil, !state.open {  // touch-and-go: pointer entering the toast clears it
             let inside = toastRect.contains(p)
             if inside && !inToast { withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) { state.flash = nil } }
@@ -315,6 +341,8 @@ func selftest() {
     precondition(Music.pick(hits, title: "Savage Mode", dur: 247.2) == "live")   // " - Live" cleans to the same title
     precondition(Music.pick(hits, title: "Savage Mode", dur: 121.4) == nil)      // different song, even if length fits
 
+    precondition(LyricLine.isRTL("دلم برات تنگ شده") && LyricLine.isRTL("جانم baby جانم"))
+    precondition(!LyricLine.isRTL("I got 10 racks") && !LyricLine.isRTL("love you جان") && !LyricLine.isRTL("♪ ♪"))
     let m = Music(); m.lyrics = l
     precondition(m.line(at: 5) == nil && m.line(at: 13.5)!.text == "Yeah" && m.line(at: 70)!.i == 2)
 
@@ -349,14 +377,13 @@ func selftest() {
 
     for name in symbols { precondition(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "missing SF Symbol \(name)") }
 
-    // reminders: most overdue enabled one wins; nothing due early; disabled ones are skipped
-    let now = Date(), rs = Coach.defaults
-    var last = Dictionary(uniqueKeysWithValues: rs.map { ($0.id, now) })
-    precondition(Coach.next(rs, last: last, now: now) == nil)
-    last["water"] = now.addingTimeInterval(-61 * 60); last["blink"] = now.addingTimeInterval(-50 * 60)
-    precondition(Coach.next(rs, last: last, now: now)?.id == "blink")  // 30m overdue beats 1m overdue
-    var off = rs; off[0].on = false
-    precondition(Coach.next(off, last: last, now: now)?.id == "water")
+    // shelf items: images get thumbnails, links show their host
+    precondition(ShelfItem(kind: .file, value: "/tmp/Screenshot 1.png").isImage && !ShelfItem(kind: .file, value: "/tmp/a.pdf").isImage)
+    precondition(ShelfItem(kind: .link, value: "https://github.com/x").name == "github.com" && !ShelfItem(kind: .link, value: "x").isImage)
+    // dragged "text" that is really a file path parks as a file (so it can be sent on); real text stays text
+    precondition(Shelf.paths(in: "/Applications") == ["/Applications"] && Shelf.paths(in: "'/Applications'\n/bin/ls") == ["/Applications", "/bin/ls"])
+    precondition(Shelf.paths(in: "file:///Applications") == ["/Applications"] && Shelf.paths(in: "hello world").isEmpty)
+    precondition(Shelf.paths(in: "/no/such/file").isEmpty && Shelf.paths(in: "/Applications\nnot a path").isEmpty)
 
     precondition(Stats.parseProc("  412  23.5  81232 Google Chrome Helper") == Proc(id: 412, name: "Google Chrome Helper", cpu: 23.5, mem: 81232 * 1024))
     precondition(Stats.parseProc("PID %CPU") == nil)

@@ -63,7 +63,7 @@ let symbols = Tab.allCases.map(\.icon) + [
     "xmark", "note.text", "textformat.size.smaller", "textformat.size.larger",
     "heart.fill", "flame.fill", "eye", "figure.mind.and.body", "hand.raised.fingers.spread", "figure.stand", "drop.fill",
     "wind", "minus", "plus", "pause.fill", "forward.end.fill", "circle.fill",
-    "hand.raised.fill", "hand.raised.fingers.spread.fill", "chart.bar.fill", "list.bullet",
+    "hand.raised.fill", "hand.raised.fingers.spread.fill", "chart.bar.fill", "list.bullet", "tray.and.arrow.down.fill", "tray.full.fill", "square.and.arrow.up",
     "questionmark.bubble.fill", "questionmark", "arrow.up.forward.app", "arrow.right", "link", "checkmark.seal.fill",
     "memorychip", "network", "arrow.down", "arrow.up", "internaldrive", "thermometer.medium", "clock",
     "music.note.list", "battery.100percent", "battery.75percent", "battery.50percent", "battery.25percent", "battery.0percent",
@@ -970,8 +970,19 @@ struct LyricsNow: View {
 struct LyricLine: View {
     let text: String, p: Double, size: CGFloat
 
+    /// Persian/Arabic/Hebrew lines are sung right to left: fill and shine start from the right.
+    static func isRTL(_ s: String) -> Bool {
+        var rtl = 0, ltr = 0
+        for u in s.unicodeScalars where u.properties.isAlphabetic {
+            let v = u.value
+            if (0x0590...0x08FF).contains(v) || (0xFB1D...0xFDFF).contains(v) || (0xFE70...0xFEFF).contains(v) { rtl += 1 } else { ltr += 1 }
+        }
+        return rtl > ltr
+    }
+
     var body: some View {
         let f = Font.system(size: size, weight: .black).width(.condensed)
+        let rtl = Self.isRTL(text)
         Text(text).font(f).foregroundStyle(Color.white.opacity(0.32))
             .overlay {
                 // sung part: polished white-chrome, a highlight sweeping across, soft white glow
@@ -983,11 +994,15 @@ struct LyricLine: View {
                         .overlay {
                             LinearGradient(stops: [.init(color: .clear, location: x - 0.1), .init(color: .white, location: x),
                                                    .init(color: .clear, location: x + 0.1)],
-                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                                           startPoint: rtl ? .topTrailing : .topLeading, endPoint: rtl ? .bottomLeading : .bottomTrailing)
                                 .mask(Text(text).font(f))
                                 .blendMode(.plusLighter)
                         }
-                        .mask(alignment: .leading) { GeometryReader { g in Rectangle().frame(width: g.size.width * p) } }
+                        .mask {
+                            GeometryReader { g in
+                                Rectangle().frame(width: g.size.width * p).frame(maxWidth: .infinity, alignment: rtl ? .trailing : .leading)
+                            }
+                        }
                         .shadow(color: .white.opacity(0.5), radius: size / 7)
                 }
             }
